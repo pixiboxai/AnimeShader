@@ -208,10 +208,13 @@ uniform texture2D HighlightMap <
     string UIName = "Highlight Map"; string UIWidget = "FilePicker";
     string UIGroup = "5 - Highlight"; int UIOrder = 500;
 >;
+// CLAMP_TO_EDGE, not CLAMP_TO_BORDER: Maya's own effects never use the latter
+// and OGSFX has no syntax for a border colour. The shader bounds-checks the
+// highlight UV itself, so edge clamping is enough.
 uniform sampler2D HighlightSampler = sampler_state {
     Texture = <HighlightMap>;
     TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
-    TEXTURE_WRAP_S = CLAMP_TO_BORDER;  TEXTURE_WRAP_T = CLAMP_TO_BORDER;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
 };
 
 uniform bool UseHighlightMap <
@@ -404,7 +407,8 @@ GLSLShader PS_Main
         // View direction in tangent space drives both the parallax and the
         // way the highlight slides across the cornea.
         vec3 vTS = vec3(dot(V, T), dot(V, B), dot(V, N));
-        vTS.z = (abs(vTS.z) < 1e-3) ? 1e-3 : vTS.z;
+        // Guard the divide without flipping the sign at grazing angles.
+        if (abs(vTS.z) < 1e-3) vTS.z = (vTS.z < 0.0) ? -1e-3 : 1e-3;
         vec2 viewOffset = clamp(vTS.xy / vTS.z, vec2(-ParallaxClamp), vec2(ParallaxClamp));
 
         //---- iris, shifted so it reads as sitting behind the cornea --------

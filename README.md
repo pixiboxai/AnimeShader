@@ -151,7 +151,23 @@ Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 Phần không cần GPU thì test được headless, không cần mở Maya. Cả hai đều trả exit code
 nên cắm vào CI được.
 
-**Khớp tên giữa shader / preset / UI** — chạy bằng Python thuần, không cần cả Maya:
+**Lint shader** — Python thuần, bắt lỗi *trước* khi phải mở Maya:
+
+```bash
+python tests/test_shader_lint.py
+```
+
+Maya chỉ parse effect khi Viewport 2.0 có draw context thật, nên shader vừa viết xong sẽ
+nằm im không ai kiểm cho tới lúc có người mở GUI. Linter khoả lấp phần đó: token sampler
+Maya thật sự nhận, varying gọi qua `VS_OUT`/`PS_IN` mà attribute block không khai báo,
+vertex input thiếu trong `APPDATA`, pass nối vào block không tồn tại, và pixel output có
+được ghi không.
+
+Token sampler là bài học có thật: `CLAMP_TO_BORDER` không xuất hiện trong bất kỳ shader
+nào Maya ship, và OGSFX không có cú pháp đặt border colour. Danh sách token hợp lệ giờ
+nằm trong linter chứ không nằm trong trí nhớ ai cả.
+
+**Khớp tên giữa shader / preset / UI** — cũng Python thuần:
 
 ```bash
 python tests/test_shader_contract.py
