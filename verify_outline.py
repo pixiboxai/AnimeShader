@@ -252,23 +252,27 @@ def verify():
     cmds.displayRGBColor("background", 0.5, 0.5, 0.5)
     cmds.viewFit("persp", all=True)
 
-    results = {}
-    for technique in ("Anime", "AnimeOutline"):
+    def measure(tag, technique, smooth_normal=None):
         cmds.setAttr(node + ".technique", technique, type="string")
+        if smooth_normal is not None:
+            full = node + ".OutlineUseSmoothNormal"
+            if cmds.objExists(full):
+                cmds.setAttr(full, smooth_normal)
         cmds.refresh(force=True)
-        path = _render("gntVerify_" + technique)
+        path = _render("gntVerify_" + tag)
         total, red, covered = count_pixels(path)
-        results[technique] = (red, covered)
         log("-" * 68)
-        log("%s" % technique)
+        log("%s" % tag)
         log("  image     : %s" % path)
         log("  red px    : %d" % red)
         log("  covered px: %d / %d" % (covered, total))
+        return red, covered
+
+    # --- does the outline pass run at all? -------------------------------
+    red_off, cov_off = measure("noOutline", "Anime")
+    red_on, cov_on = measure("outline_smoothNormal", "AnimeOutline", smooth_normal=1)
 
     log("=" * 68)
-    red_off, cov_off = results["Anime"]
-    red_on, cov_on = results["AnimeOutline"]
-
     if red_on > 50 and red_on > red_off * 10 + 50:
         log("PASS  outline pass RUNS.")
         log("      red pixels %d -> %d, coverage %d -> %d"
@@ -279,6 +283,31 @@ def verify():
         log("      red pixels %d -> %d (expected a large jump)" % (red_off, red_on))
         log("      Maya is running only the first colorPass. Switch to the")
         log("      duplicate-mesh outline instead.")
+        return
+
+    # --- is the baked smooth normal actually earning its keep? -----------
+    # A cube is all hard edges. Extruding along the raw face normals pulls the
+    # faces apart, so the outline ring breaks up at every edge and corner.
+    # The baked smooth normal welds them, which should show up as a longer,
+    # more continuous red ring.
+    log("")
+    log("=" * 68)
+    log("Smooth-normal comparison (cube = worst case, every edge is hard)")
+    red_raw, _cov_raw = measure("outline_rawNormal", "AnimeOutline", smooth_normal=0)
+
+    log("=" * 68)
+    log("  raw mesh normal   : %d red px" % red_raw)
+    log("  baked smooth norm : %d red px" % red_on)
+    if red_raw <= 0:
+        log("INCONCLUSIVE  raw-normal pass produced no outline at all.")
+    else:
+        gain = (red_on - red_raw) / float(red_raw) * 100.0
+        log("  difference        : %+.1f%%" % gain)
+        if red_on > red_raw:
+            log("PASS  smooth normals give a longer / less broken outline.")
+        else:
+            log("NOTE  no gain here. On this probe the raw normals already")
+            log("      close the ring; judge on a real character mesh.")
 
 
 try:
