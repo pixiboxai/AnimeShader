@@ -230,7 +230,13 @@ def prepare(mesh):
 
 def prepare_selection():
     """Run :func:`prepare` on every selected mesh."""
+    from ..core import outline
+
     meshes = cmds.ls(selection=True, dag=True, type="mesh", long=True, noIntermediate=True)
+    # Outline hulls are children of the meshes they wrap, so selecting a
+    # prepared character picks them up too. Their mesh data is a plug from the
+    # source and would overwrite anything baked here on the next evaluation.
+    meshes = [item for item in meshes if not outline.is_hull(item)]
     if not meshes:
         raise ValueError("Select at least one polygon mesh.")
 

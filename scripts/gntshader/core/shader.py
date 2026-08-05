@@ -22,6 +22,13 @@ NODE_TYPE = "GLSLShader"
 
 DEFAULT_TECHNIQUE = "AnimeOutline"
 
+# Shading with no outline pass. Pair it with the duplicated hull in
+# ``core.outline`` when Maya will not run two colorPass passes at once.
+SHADING_TECHNIQUE = "Anime"
+
+# Outline with no shading pass -- what the hull mesh gets.
+OUTLINE_TECHNIQUE = "OutlineOnly"
+
 # Type tags that map onto a plain numeric setAttr.
 _SCALAR_TYPES = {"bool", "int", "enum", "float"}
 

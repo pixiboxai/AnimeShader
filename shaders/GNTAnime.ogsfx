@@ -1203,6 +1203,23 @@ technique Anime
     }
 }
 
+// Outline on its own, one colorPass only. This is what the duplicated-hull
+// fallback assigns to the hull mesh while the original keeps `Anime`; use it
+// when Maya turns out to draw only the first colorPass of `AnimeOutline`.
+// No shadow pass on purpose -- the hull is fatter than the mesh and would
+// thicken every shadow it cast.
+technique OutlineOnly
+<
+    string variableNameAsAttributeName = "true";
+>
+{
+    pass pOutline < string drawContext = "colorPass"; >
+    {
+        VertexShader (in APPDATA, out OUTLINEDATA VS_OUT) = { Common, VS_Outline };
+        PixelShader  (in OUTLINEDATA PS_IN, out PIXELDATA_OL) = { Common, PS_Outline };
+    }
+}
+
 // Shading + inverted-hull outline.
 technique AnimeOutline
 <

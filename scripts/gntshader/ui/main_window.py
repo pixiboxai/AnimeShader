@@ -9,7 +9,7 @@ and surfacing compile errors.
 
 from maya import cmds
 
-from ..core import env, plugin, presets, shader
+from ..core import env, outline, plugin, presets, shader
 from ..utils import mesh as mesh_utils
 from ..utils.qt import QtCore, QtWidgets, delete_existing, maya_main_window
 
@@ -129,6 +129,7 @@ class GNTShaderWindow(QtWidgets.QWidget):
 
         root.addWidget(self._build_shader_group())
         root.addWidget(self._build_mesh_group())
+        root.addWidget(self._build_outline_group())
         root.addWidget(self._build_quick_group())
         root.addWidget(self._build_preset_group())
         root.addWidget(self._build_face_group())
@@ -188,6 +189,32 @@ class GNTShaderWindow(QtWidgets.QWidget):
         check_btn.clicked.connect(self.on_check_color_sets)
         row.addWidget(prep_btn)
         row.addWidget(check_btn)
+        layout.addLayout(row)
+
+        return box
+
+    def _build_outline_group(self):
+        box = QtWidgets.QGroupBox("Outline Fallback")
+        layout = QtWidgets.QVBoxLayout(box)
+
+        note = QtWidgets.QLabel(
+            "No rim on the AnimeOutline technique means Maya is drawing only\n"
+            "its first colorPass. Build gives each selected mesh a hull child\n"
+            "shaded with OutlineOnly instead -- same look, one pass each."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QtWidgets.QHBoxLayout()
+        for label, slot in (
+            ("Build Hulls", self.on_build_hull),
+            ("Remove", self.on_remove_hull),
+            ("Remove All", self.on_remove_all_hulls),
+            ("Sync Params", self.on_sync_outline),
+        ):
+            button = QtWidgets.QPushButton(label)
+            button.clicked.connect(slot)
+            row.addWidget(button)
         layout.addLayout(row)
 
         return box
@@ -392,6 +419,56 @@ class GNTShaderWindow(QtWidgets.QWidget):
                     env.SMOOTH_NORMAL_UV_SET))
         self._log("\n".join(lines))
 
+    def on_build_hull(self):
+        node = self.current_node()
+        try:
+            hulls = outline.build_selection()
+        except (ValueError, RuntimeError) as exc:
+            self._log("Hull build failed: {0}".format(exc))
+            return
+
+        lines = ["Built {0} hull(s):".format(len(hulls))]
+        lines.extend("  " + item.split("|")[-1] for item in hulls)
+
+        if node:
+            # A hull plus the two-pass technique draws the outline twice, which
+            # looks worse than either on its own.
+            if shader.technique(node) == shader.DEFAULT_TECHNIQUE:
+                shader.set_technique(node, shader.SHADING_TECHNIQUE)
+                lines.append("Switched {0} to '{1}' so the outline is not drawn "
+                             "twice.".format(node, shader.SHADING_TECHNIQUE))
+            try:
+                applied = outline.sync_params(node)
+                lines.append("Copied {0} outline uniform(s) onto {1}.".format(
+                    len(applied), outline.find_shader()))
+            except ValueError as exc:
+                lines.append(str(exc))
+            # The hull shader is a node that did not exist a moment ago.
+            self.refresh()
+
+        self._log("\n".join(lines))
+
+    def on_remove_hull(self):
+        removed = outline.remove_selection()
+        self._log("Removed {0} hull(s).".format(removed) if removed
+                  else "Nothing in the selection has an outline hull.")
+
+    def on_remove_all_hulls(self):
+        self._log("Removed {0} hull(s) from the scene.".format(outline.remove_all()))
+
+    def on_sync_outline(self):
+        node = self.current_node()
+        if not node:
+            self._log("Select the shading shader to copy the outline settings from.")
+            return
+        try:
+            applied = outline.sync_params(node)
+        except ValueError as exc:
+            self._log(str(exc))
+            return
+        self._log("Copied onto {0}:\n  {1}".format(
+            outline.find_shader(), "\n  ".join(applied) or "(nothing)"))
+
     def on_apply_preset(self):
         node = self.current_node()
         name = self.preset_combo.currentText()
@@ -405,7 +482,17 @@ class GNTShaderWindow(QtWidgets.QWidget):
             self._log("Preset failed: {0}".format(exc))
             return
         self._sync_node()
-        self._log("Applied preset '{0}'.".format(name))
+
+        message = "Applied preset '{0}'.".format(name)
+        # A preset carries the outline settings too, and those live on the hull
+        # shader once the fallback is in use.
+        if outline.list_hulls():
+            try:
+                outline.sync_params(node)
+                message += " Outline settings forwarded to the hull shader."
+            except ValueError:
+                pass
+        self._log(message)
 
     def on_save_preset(self):
         node = self.current_node()

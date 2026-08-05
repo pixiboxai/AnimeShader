@@ -178,15 +178,22 @@ def validate(shader_file=SHADER, keep=True):
     else:
         print("DIAGNOSTICS: (empty)")
 
-    ok = bool(techniques) and not diagnostics.strip()
+    missing = [name for name in ("Anime", "AnimeOutline", "OutlineOnly")
+               if name not in techniques]
+    if missing:
+        print("!! techniques missing from the effect: %s" % ", ".join(missing))
+
+    ok = bool(techniques) and not missing and not diagnostics.strip()
     print("-" * 68)
     if ok:
         print("PASS  effect compiled -- %d techniques, %d uniforms"
               % (len(techniques), len(uniforms)))
         print()
         print("Next: look through the persp viewport. You should see a shaded")
-        print("sphere. Switch technique to 'AnimeOutline' to check the outline")
+        print("cube. Switch technique to 'AnimeOutline' to check the outline")
         print("pass actually draws -- that is the one unverified assumption.")
+        print("If no rim appears, run check_hull_fallback() for the one-pass")
+        print("route that does not depend on it.")
     else:
         print("FAIL  effect did not compile. Read the diagnostics above.")
         if not techniques and not diagnostics.strip():
@@ -217,8 +224,61 @@ def check_multipass_outline(node=None):
     cmds.refresh(force=True)
     print("Switched to AnimeOutline.")
     print("Look at the viewport: if there is no dark rim around the silhouette,")
-    print("Maya is only running the first colorPass. Fall back to the duplicate-")
-    print("mesh outline described in docs/00_research_anime_shader.md section 6.")
+    print("Maya is only running the first colorPass. Run check_hull_fallback()")
+    print("to switch to the duplicated-hull outline, which never needs two.")
+
+
+def check_hull_fallback(mesh=None, node=None):
+    """Put the probe mesh on the duplicated-hull outline and report.
+
+    Leaves the scene in the fallback configuration: shading shader on the
+    `Anime` technique, a hull child on the mesh carrying `OutlineOnly`.
+    """
+    scripts_dir = ROOT + "/scripts"
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    from gntshader.core import outline as outline_utils
+
+    mesh = mesh or (cmds.ls(PROBE_PREFIX + "Cube") or [None])[0]
+    node = node or (cmds.ls(type="GLSLShader") or [None])[0]
+    if not mesh or not node:
+        print("Need a probe mesh and a GLSLShader node -- run validate() first.")
+        return False
+
+    try:
+        hull = outline_utils.build(mesh)
+    except (ValueError, RuntimeError) as exc:
+        print("!! hull build FAILED: %s" % exc)
+        return False
+
+    hull_shader = outline_utils.find_shader()
+    cmds.setAttr(node + ".technique", "Anime", type="string")
+    for attr, value in (("OutlineWidth", 1.5), ("OutlineUseSmoothNormal", 1)):
+        full = "{0}.{1}".format(hull_shader, attr)
+        if cmds.objExists(full):
+            cmds.setAttr(full, value)
+    cmds.refresh(force=True)
+
+    hull_shape = cmds.listRelatives(hull, shapes=True, fullPath=True)[0]
+    diagnostics = cmds.getAttr(hull_shader + ".diagnostics") or ""
+
+    print("-" * 68)
+    print("hull        : %s" % hull)
+    print("driven by   : %s" % outline_utils.source_of(hull))
+    print("hull shader : %s (technique %s)"
+          % (hull_shader, cmds.getAttr(hull_shader + ".technique")))
+    print("hull faces  : %d" % cmds.polyEvaluate(hull_shape, face=True))
+    if diagnostics.strip():
+        print("DIAGNOSTICS:")
+        print(diagnostics)
+        return False
+
+    print("PASS  hull built and shaded, no compile errors.")
+    print()
+    print("Look at the viewport: the cube should now have a rim even though the")
+    print("shading shader is on 'Anime'. That rim comes from the hull, so it is")
+    print("proof the fallback works whatever Maya does with multi-pass.")
+    return True
 
 
 try:

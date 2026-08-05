@@ -60,14 +60,61 @@ presets.apply(node, "gbfr_like")
 
 ---
 
+## Outline: hai đường, dùng đường nào
+
+Technique `AnimeOutline` vẽ outline bằng **pass thứ hai** trong cùng một effect.
+Cả hai pass đều khai `drawContext = "colorPass"`, và Autodesk không tài liệu hoá
+việc Maya có chạy cả hai hay không. Nếu Maya chỉ chạy pass đầu thì outline biến
+mất — im lặng, không lỗi, không diagnostics.
+
+Nên có đường thứ hai không phụ thuộc vào điều đó: **hull nhân đôi**. Mỗi mesh
+được gắn thêm một mesh con, nối `outMesh → inMesh`, gán technique `OutlineOnly`.
+Mỗi effect chỉ còn một colorPass.
+
+Trong UI, nhóm `Outline Fallback`:
+
+| Nút | Việc |
+|---|---|
+| `Build Hulls` | tạo hull cho mesh đang chọn, chuyển shader chính về `Anime`, copy các uniform outline sang shader hull |
+| `Remove` / `Remove All` | gỡ hull của selection / của cả scene |
+| `Sync Params` | copy lại uniform outline sau khi chỉnh tay (hai shader là hai node riêng) |
+
+Không dùng UI:
+
+```python
+from gntshader.core import outline, shader
+
+outline.build_selection()          # hull cho mọi mesh đang chọn
+shader.set_technique(node, "Anime")  # tắt pass outline của shader chính
+outline.sync_params(node)          # đẩy thiết lập outline sang shader hull
+```
+
+Vài điểm về cách hull được dựng, vì chúng quyết định hull "sống" hay "chết":
+
+- Hull lấy mesh qua **plug** chứ không phải bản sao tĩnh, nên skinning, UV set
+  và color set chảy theo — smooth normal đã bake dùng lại được, không cần
+  scriptJob đồng bộ.
+- Hull là **con của chính transform nguồn**, nên world matrix trùng nhau. Nhờ
+  vậy `gWorldXf` và toạ độ object-space mà outline noise lấy mẫu giống hệt
+  đường multi-pass — fallback *trùng* look chứ không phải xấp xỉ. Ẩn hoặc xoá
+  nhân vật cũng kéo theo outline.
+- Hull tắt `castsShadows` / `receiveShadows` (nó phình to hơn mesh thật) và đặt
+  display type `reference` để không click trúng trong viewport.
+
+Đừng bật cả hai cùng lúc: `AnimeOutline` + hull sẽ vẽ outline hai lần. `Build
+Hulls` tự chuyển shader chính về `Anime` để tránh việc đó.
+
+---
+
 ## Cấu trúc
 
 ```
-shaders/GNTAnime.ogsfx      shader chính (2 technique: Anime, AnimeOutline)
+shaders/GNTAnime.ogsfx      shader chính (3 technique: Anime, AnimeOutline, OutlineOnly)
 scripts/gntshader/
     core/env.py             đường dẫn, tên color set
     core/plugin.py          nạp glslShader, kiểm tra renderer
     core/shader.py          tạo/gán/query node GLSLShader, head basis
+    core/outline.py         hull nhân đôi (fallback outline một pass)
     core/presets.py         lưu & nạp preset JSON
     utils/mesh.py           bake smooth normal (port từ SmoothNormal.cs)
     utils/qt.py             shim PySide2 / PySide6
@@ -82,14 +129,16 @@ GNTShader.mod               mẫu module (install.py tự sinh bản có đườ
 
 ## Vertex streams
 
-Shader đọc hai color set, **thứ tự tạo quyết định binding**:
+Shader đọc một color set và một UV set phụ, **thứ tự tạo quyết định binding**:
 
-| Binding | Color set | Nội dung |
+| Binding | Set | Nội dung |
 |---|---|---|
-| COLOR0 | `GNT_paint` | R = hệ số dày outline, G = AO |
-| COLOR1 | `GNT_smoothNormal` | RGB = smooth normal ở tangent space |
+| COLOR0 | color set `GNT_paint` | R = hệ số dày outline, G = AO |
+| TEXCOORD1 | UV set `GNT_smoothNormal` | smooth normal tangent-space, mã hoá octahedral thành 2 float |
 
-`Prepare Selected Meshes` tạo đúng thứ tự. Nút `Check Colour Sets` để kiểm tra lại.
+Smooth normal nằm ở UV set chứ không phải color set thứ hai — lý do ở bảng
+"Hai ràng buộc của Maya" bên dưới. `Prepare Selected Meshes` tạo đúng thứ tự,
+nút `Check Colour Sets` kiểm tra lại.
 
 ---
 
@@ -116,10 +165,15 @@ Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 **Chưa xác minh** — hai điểm cần nhìn viewport bằng mắt:
 
 1. **Multi-pass outline** — chưa rõ Maya có chạy cả hai pass cùng `drawContext = "colorPass"`
-   hay không. Nếu không, technique `Anime` (chỉ shading) vẫn chạy bình thường, và outline
-   phải chuyển sang cách nhân đôi mesh.
+   hay không. Không còn là rủi ro chặn đường: nếu Maya bỏ pass thứ hai thì dùng hull nhân
+   đôi (`Build Hulls`), mỗi effect một colorPass. Vẫn nên xác minh để biết đường nào là
+   mặc định — multi-pass rẻ hơn một draw call và một mesh node cho mỗi object.
 2. **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
    mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
+   Điều này đúng cho cả hai đường, vì hull cũng chạy `PS_Outline`.
+
+Chạy `check_hull_fallback()` sau `validate.py` để dựng hull trên cube probe và kiểm tra
+đường fallback biên dịch sạch.
 
 ### Hai ràng buộc của Maya đã phải xử lý
 
@@ -133,6 +187,6 @@ Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 ## Hướng tiếp theo
 
 - Xác minh trong Maya GUI, sửa lỗi compile nếu có
-- Fallback outline bằng mesh nhân đôi
+- ~~Fallback outline bằng mesh nhân đôi~~ — xong, xem mục Outline ở trên
 - Shader riêng cho mắt (parallax iris, highlight xoay theo camera)
 - Xuất preset sang Unity URP để khớp look giữa Maya và engine
