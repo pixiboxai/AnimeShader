@@ -113,11 +113,23 @@ exec(open(PROJECT_ROOT + "/validate.py").read())
 
 Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 
-**Chưa xác minh** — hai điểm cần nhìn viewport bằng mắt:
+**Chưa xác minh:**
 
 1. **Multi-pass outline** — chưa rõ Maya có chạy cả hai pass cùng `drawContext = "colorPass"`
    hay không. Nếu không, technique `Anime` (chỉ shading) vẫn chạy bình thường, và outline
    phải chuyển sang cách nhân đôi mesh.
+
+   Kiểm tra bằng cách đếm pixel, không cần nhìn viewport — render hai lần, một lần
+   `Anime` một lần `AnimeOutline` với màu outline đỏ thuần và mọi nguồn đỏ khác tắt hết,
+   rồi đếm pixel đỏ:
+
+   ```python
+   PROJECT_ROOT = r"D:/path/to/GNTShader"
+   exec(open(PROJECT_ROOT + "/verify_outline.py").read())
+   ```
+
+   Kết quả ghi ra `verify_outline_result.txt`.
+
 2. **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
    mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
 
