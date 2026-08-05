@@ -118,7 +118,21 @@ Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 
 ### Test
 
-Phần không cần GPU thì test được headless, không cần mở Maya:
+Phần không cần GPU thì test được headless, không cần mở Maya. Cả hai đều trả exit code
+nên cắm vào CI được.
+
+**Khớp tên giữa shader / preset / UI** — chạy bằng Python thuần, không cần cả Maya:
+
+```bash
+python tests/test_shader_contract.py
+```
+
+Lý do tồn tại: key preset không khớp uniform thì lúc chạy bị bỏ qua kèm một cảnh báo rất
+dễ trôi, preset trông như đã áp dụng mà look thực ra sai. Test đối chiếu mọi key preset,
+mọi slider trong UI, và tên uniform mà code Python gọi, với uniform thật khai báo trong
+`.ogsfx`. Kèm chốt chặn hồi quy: cấm khai báo `COLOR1` trong `APPDATA`.
+
+**Bake smooth normal** — cần `mayapy` (dùng OpenMaya, không cần GUI):
 
 ```bash
 "C:/Program Files/Autodesk/Maya2024/bin/mayapy.exe" tests/test_mesh_roundtrip.py
@@ -126,8 +140,8 @@ Phần không cần GPU thì test được headless, không cần mở Maya:
 
 Kiểm 5 loại mesh (cube toàn cạnh cứng, sphere, torus, cylinder, cone có đỉnh suy biến):
 octahedral round-trip, bake → đọc lại từ mesh → giải mã đúng phép toán của shader, và
-UV set / colour set có rơi đúng vào `TEXCOORD1` / `COLOR0` không. Trả exit code nên cắm
-vào CI được. Hiện sai số lớn nhất là **0.000000** ở cả 5 loại.
+UV set / colour set có rơi đúng vào `TEXCOORD1` / `COLOR0` không. Sai số lớn nhất hiện
+là **0.000000** ở cả 5 loại.
 
 Phần cần GPU thì chạy trong Maya. Đo outline (render hai lần rồi đếm pixel đỏ, không cần
 nhìn viewport):
