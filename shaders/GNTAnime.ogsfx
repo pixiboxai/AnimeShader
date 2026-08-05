@@ -1102,11 +1102,25 @@ GLSLShader VS_Outline
         // Baked smooth normal arrives octahedral-encoded in the 2nd UV set,
         // expressed in tangent space so it survives skinning.
         if (OutlineUseSmoothNormal) {
-            vec3 tsN = octDecode(inOctNormal);
-            mat3 TBN = mat3(normalize(inTangent),
-                            normalize(inBinormal),
-                            normalize(inNormal));
-            nrm = normalize(TBN * tsN);
+            // Gram-Schmidt, matching orthonormal_basis() in utils/mesh.py.
+            // The bake writes the vector with dot products (transpose) and we
+            // read it back with a matrix multiply; those only agree when the
+            // basis is orthonormal, and Maya's UV-derived tangent is not.
+            vec3 N = normalize(inNormal);
+
+            vec3 T = inTangent - N * dot(N, inTangent);
+            if (length(T) < 1e-8) {
+                T = vec3(1.0, 0.0, 0.0) - N * dot(N, vec3(1.0, 0.0, 0.0));
+                if (length(T) < 1e-8) {
+                    T = vec3(0.0, 1.0, 0.0) - N * dot(N, vec3(0.0, 1.0, 0.0));
+                }
+            }
+            T = normalize(T);
+
+            vec3 B = cross(N, T);
+            if (dot(B, inBinormal) < 0.0) B = -B;
+
+            nrm = normalize(mat3(T, B, N) * octDecode(inOctNormal));
         }
 
         vec4 wp = gWorldXf * vec4(inPosition, 1.0);

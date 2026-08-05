@@ -64,6 +64,35 @@ def oct_encode(vector):
     return x * 0.5 + 0.5, y * 0.5 + 0.5
 
 
+def orthonormal_basis(normal, tangent, binormal):
+    """Gram-Schmidt a Maya tangent frame into an orthonormal (T, B, N).
+
+    Maya derives tangents from UVs, so T is not exactly perpendicular to N.
+    That matters here: the bake writes a vector into tangent space with dot
+    products (i.e. the *transpose*), while the shader reads it back with a
+    matrix multiply. Transpose only equals inverse for an orthonormal basis,
+    so both sides must orthonormalise the same way or the round trip drifts.
+
+    GNTAnime.ogsfx runs the identical three steps in VS_Outline.
+    """
+    n = normal.normal()
+
+    t = tangent - n * (n * tangent)
+    if t.length() < 1e-8:
+        # Degenerate tangent: any perpendicular will do, both sides agree
+        # because the shader applies the same fallback.
+        t = om.MVector(1.0, 0.0, 0.0) - n * (n * om.MVector(1.0, 0.0, 0.0))
+        if t.length() < 1e-8:
+            t = om.MVector(0.0, 1.0, 0.0) - n * (n * om.MVector(0.0, 1.0, 0.0))
+    t = t.normal()
+
+    b = n ^ t
+    if (b * binormal) < 0.0:
+        b = -b
+
+    return t, b, n
+
+
 def _corner_angle(apex, a, b):
     """Angle of the polygon corner at ``apex`` between neighbours ``a`` and ``b``."""
     va = om.MVector(a - apex)
@@ -125,14 +154,25 @@ def bake_smooth_normals(mesh, uv_set=None):
     """
     uv_set = uv_set or env.SMOOTH_NORMAL_UV_SET
 
-    dag = _dag_path(mesh)
-    fn = om.MFnMesh(dag)
-
-    if not fn.getUVSetNames():
+    if not om.MFnMesh(_dag_path(mesh)).getUVSetNames():
         raise RuntimeError(
             "{0} has no UV set. Tangent-space smooth normals need UVs; "
             "unwrap the mesh first.".format(mesh)
         )
+
+    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
+    target_node = transform[0] if transform else mesh
+
+    # Create the UV set *before* taking the MFnMesh below. A function set held
+    # across cmds.polyUVSet(create=True) does not pick the new set up: setUVs
+    # then fails with "value not in valid range", and has been seen to
+    # segfault outright.
+    existing = cmds.polyUVSet(target_node, query=True, allUVSets=True) or []
+    if uv_set not in existing:
+        cmds.polyUVSet(target_node, create=True, uvSet=uv_set)
+
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
 
     smooth = compute_smooth_normals(mesh)
     points = fn.getPoints(om.MSpace.kObject)
@@ -164,14 +204,14 @@ def bake_smooth_normals(mesh, uv_set=None):
         for i in range(count):
             vertex_id = indices[offset + i]
 
-            normal = om.MVector(face_normals[i])
-            tangent = om.MVector(tangents[fv])
-            binormal = om.MVector(binormals[fv])
+            t, b, n = orthonormal_basis(om.MVector(face_normals[i]),
+                                        om.MVector(tangents[fv]),
+                                        om.MVector(binormals[fv]))
 
-            target = smooth.get(_position_key(points[vertex_id]), normal)
+            target = smooth.get(_position_key(points[vertex_id]), n)
 
-            # Object-space vector -> tangent space is a dot against each axis.
-            ts = om.MVector(target * tangent, target * binormal, target * normal)
+            # With an orthonormal basis, world -> tangent is a dot per axis.
+            ts = om.MVector(target * t, target * b, target * n)
             if ts.length() > 1e-12:
                 ts = ts.normal()
 
@@ -181,17 +221,8 @@ def bake_smooth_normals(mesh, uv_set=None):
             fv += 1
         offset += count
 
-    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
-    target_node = transform[0] if transform else mesh
-
-    existing = cmds.polyUVSet(target_node, query=True, allUVSets=True) or []
-    if uv_set not in existing:
-        cmds.polyUVSet(target_node, create=True, uvSet=uv_set)
-
-    uv_ids = om.MIntArray(range(len(us)))
-
     fn.setUVs(us, vs, uv_set)
-    fn.assignUVs(counts, uv_ids, uv_set)
+    fn.assignUVs(counts, om.MIntArray(range(len(us))), uv_set)
 
     return uv_set
 

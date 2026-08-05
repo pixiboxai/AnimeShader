@@ -116,8 +116,21 @@ exec(open(PROJECT_ROOT + "/validate.py").read())
 
 Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 
-Chạy lại phép đo outline bất cứ lúc nào (không cần nhìn viewport — nó render hai lần
-rồi đếm pixel đỏ):
+### Test
+
+Phần không cần GPU thì test được headless, không cần mở Maya:
+
+```bash
+"C:/Program Files/Autodesk/Maya2024/bin/mayapy.exe" tests/test_mesh_roundtrip.py
+```
+
+Kiểm 5 loại mesh (cube toàn cạnh cứng, sphere, torus, cylinder, cone có đỉnh suy biến):
+octahedral round-trip, bake → đọc lại từ mesh → giải mã đúng phép toán của shader, và
+UV set / colour set có rơi đúng vào `TEXCOORD1` / `COLOR0` không. Trả exit code nên cắm
+vào CI được. Hiện sai số lớn nhất là **0.000000** ở cả 5 loại.
+
+Phần cần GPU thì chạy trong Maya. Đo outline (render hai lần rồi đếm pixel đỏ, không cần
+nhìn viewport):
 
 ```python
 PROJECT_ROOT = r"D:/path/to/GNTShader"
@@ -131,7 +144,11 @@ Kết quả ghi ra `verify_outline_result.txt`.
 - **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
   mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
 - **Chưa đo** mức độ smooth normal thực sự vá được vết nứt viền ở cạnh cứng so với
-  dùng normal thường.
+  dùng normal thường. `verify_outline.py` có sẵn phép so, chỉ chưa chạy.
+- Bake và shader đều trực chuẩn hoá khung tangent (Gram-Schmidt) trước khi mã hoá /
+  giải mã. Trên primitive của Maya thì **không cần** — đo được tangent lệch vuông góc
+  đúng 0.0000°. Giữ lại để phòng mesh nhân vật unwrap tay có UV méo; nếu gặp viền dày
+  mỏng thất thường thì đây là chỗ đáng nghi đầu tiên.
 
 ### Hai ràng buộc của Maya đã phải xử lý
 
