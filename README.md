@@ -103,6 +103,9 @@ Shader đọc hai color set, **thứ tự tạo quyết định binding**:
   97 uniform, 14 UI group, 3 slot đèn bind đúng.
 - Vertex stream bind đủ: `Position, Normal, Color0, Tangent, Binormal, TexCoord0, TexCoord1`.
 - Bake smooth normal chạy đạt trên cube / sphere / torus; round-trip octahedral sai số 0.
+- **Outline pass chạy thật.** Maya *có* thực thi cả hai pass cùng khai báo
+  `drawContext = "colorPass"`. Đo bằng cách đếm pixel: cùng một probe, đổi technique,
+  pixel đỏ đi từ **0 → 625**, vùng phủ từ 7604 → 8189. Không cần fallback nhân đôi mesh.
 
 Chạy lại bất cứ lúc nào:
 
@@ -113,25 +116,22 @@ exec(open(PROJECT_ROOT + "/validate.py").read())
 
 Kết quả cũng được ghi ra `validate_result.txt` cạnh repo.
 
-**Chưa xác minh:**
+Chạy lại phép đo outline bất cứ lúc nào (không cần nhìn viewport — nó render hai lần
+rồi đếm pixel đỏ):
 
-1. **Multi-pass outline** — chưa rõ Maya có chạy cả hai pass cùng `drawContext = "colorPass"`
-   hay không. Nếu không, technique `Anime` (chỉ shading) vẫn chạy bình thường, và outline
-   phải chuyển sang cách nhân đôi mesh.
+```python
+PROJECT_ROOT = r"D:/path/to/GNTShader"
+exec(open(PROJECT_ROOT + "/verify_outline.py").read())
+```
 
-   Kiểm tra bằng cách đếm pixel, không cần nhìn viewport — render hai lần, một lần
-   `Anime` một lần `AnimeOutline` với màu outline đỏ thuần và mọi nguồn đỏ khác tắt hết,
-   rồi đếm pixel đỏ:
+Kết quả ghi ra `verify_outline_result.txt`.
 
-   ```python
-   PROJECT_ROOT = r"D:/path/to/GNTShader"
-   exec(open(PROJECT_ROOT + "/verify_outline.py").read())
-   ```
+**Còn phải lưu ý:**
 
-   Kết quả ghi ra `verify_outline_result.txt`.
-
-2. **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
-   mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
+- **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
+  mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
+- **Chưa đo** mức độ smooth normal thực sự vá được vết nứt viền ở cạnh cứng so với
+  dùng normal thường.
 
 ### Hai ràng buộc của Maya đã phải xử lý
 
