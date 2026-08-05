@@ -1,0 +1,1227 @@
+#version 410
+
+//=============================================================================
+//  GNTAnime.ogsfx  --  Anime / cel shader for Maya Viewport 2.0
+//
+//  Load with the "glslShader" plugin.
+//
+//  Techniques
+//    Anime         : shading only (safest -- always renders)
+//    AnimeOutline  : shading + inverted-hull outline pass
+//
+//  Vertex streams expected
+//    COLOR0    : artist paint  R = outline width mult, G = AO, B/A = spare
+//    TEXCOORD1 : baked data    octahedral-encoded tangent-space smooth normal
+//                -> bake with gntshader.utils.mesh.bake_smooth_normals()
+//    Missing streams degrade gracefully (Maya supplies defaults).
+//
+//  Why TEXCOORD1 and not COLOR1: Maya's glslShader binds exactly one colour
+//  stream. Declaring COLOR1 compiles, but the varying is silently dropped --
+//  confirmed by `GLSLShader -q -varyingParameters` returning only Color0.
+//  A unit vector octahedral-encodes into 2 floats, which fits a UV set exactly.
+//
+//  Notes
+//    - Maya flips V when sampling in GLSL. Always go through flipUV().
+//    - OGSFX has no render-state block, so the outline pass culls front faces
+//      in the pixel shader via gl_FrontFacing instead of "Cull Front".
+//=============================================================================
+
+
+//-----------------------------------------------------------------------------
+//  System matrices
+//-----------------------------------------------------------------------------
+uniform mat4 gWVPXf   : WorldViewProjection < string UIWidget = "None"; >;
+uniform mat4 gWorldXf : World               < string UIWidget = "None"; >;
+uniform mat4 gWorldIT : WorldInverseTranspose < string UIWidget = "None"; >;
+uniform mat4 gViewIXf : ViewInverse         < string UIWidget = "None"; >;
+uniform mat4 gVPXf    : ViewProjection      < string UIWidget = "None"; >;
+uniform mat4 gViewXf  : View                < string UIWidget = "None"; >;
+uniform vec2 gScreen  : ViewportPixelSize   < string UIWidget = "None"; >;
+
+
+//-----------------------------------------------------------------------------
+//  Base
+//-----------------------------------------------------------------------------
+uniform vec3 BaseColor <
+    string UIName   = "Base Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "1 - Base";
+    int    UIOrder  = 100;
+> = {1.0, 1.0, 1.0};
+
+uniform texture2D AlbedoMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Albedo Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "1 - Base";
+    int    UIOrder  = 101;
+>;
+uniform sampler2D AlbedoSampler = sampler_state {
+    Texture = <AlbedoMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseAlbedoMap <
+    string UIName  = "Use Albedo Map";
+    string UIGroup = "1 - Base";
+    int    UIOrder = 102;
+> = false;
+
+uniform bool AlbedoIsSRGB <
+    string UIName  = "Albedo Is sRGB";
+    string UIGroup = "1 - Base";
+    int    UIOrder = 103;
+> = true;
+
+uniform bool UseAlphaClip <
+    string UIName  = "Alpha Clip";
+    string UIGroup = "1 - Base";
+    int    UIOrder = 104;
+> = false;
+
+uniform float AlphaCutoff <
+    string UIName   = "Alpha Cutoff";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "1 - Base";
+    int    UIOrder  = 105;
+> = 0.5;
+
+
+//-----------------------------------------------------------------------------
+//  Cel shading
+//-----------------------------------------------------------------------------
+uniform texture2D RampMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Diffuse Ramp";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 200;
+>;
+uniform sampler2D RampSampler = sampler_state {
+    Texture = <RampMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform bool UseRampMap <
+    string UIName  = "Use Diffuse Ramp";
+    string UIGroup = "2 - Shading";
+    int    UIOrder = 201;
+> = false;
+
+uniform float RampRows <
+    string UIName   = "Ramp Row Count";
+    string UIWidget = "Slider";
+    float  UIMin = 1.0; float UIMax = 16.0; float UIStep = 1.0;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 202;
+> = 1.0;
+
+uniform float RampRowIndex <
+    string UIName   = "Ramp Row (manual)";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 15.0; float UIStep = 1.0;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 203;
+> = 0.0;
+
+uniform vec3 ShadowColor <
+    string UIName   = "Shadow Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 204;
+> = {0.55, 0.52, 0.65};
+
+uniform float ShadowThreshold <
+    string UIName   = "Shadow Threshold";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 205;
+> = 0.5;
+
+uniform float ShadowSoftness <
+    string UIName   = "Shadow Softness";
+    string UIWidget = "Slider";
+    float  UIMin = 0.001; float UIMax = 0.5; float UIStep = 0.005;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 206;
+> = 0.03;
+
+uniform float HalfLambert <
+    string UIName   = "Half Lambert";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 207;
+> = 1.0;
+
+uniform vec3 AmbientColor <
+    string UIName   = "Ambient Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 208;
+> = {0.18, 0.18, 0.22};
+
+uniform float FillLightScale <
+    string UIName   = "Fill Light Scale";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 0.05;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 209;
+> = 0.35;
+
+
+//-----------------------------------------------------------------------------
+//  Light direction override  (art-directed key light)
+//-----------------------------------------------------------------------------
+uniform bool UseLightOverride <
+    string UIName  = "Override Key Light";
+    string UIGroup = "3 - Key Light";
+    int    UIOrder = 300;
+> = false;
+
+uniform vec3 LightDirOverride <
+    string UIName   = "Key Light Direction";
+    string UIGroup  = "3 - Key Light";
+    int    UIOrder  = 301;
+> = {-0.4, 0.6, 0.7};
+
+uniform float KeyLightIndex <
+    string UIName   = "Key Light Index";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 1.0;
+    string UIGroup  = "3 - Key Light";
+    int    UIOrder  = 302;
+> = 0.0;
+
+
+//-----------------------------------------------------------------------------
+//  ILM / lightmap  (Genshin-style packed mask)
+//    R = specular intensity, G = shadow offset / AO, B = specular size, A = material ID
+//-----------------------------------------------------------------------------
+uniform texture2D LightMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "ILM / Light Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 400;
+>;
+uniform sampler2D LightMapSampler = sampler_state {
+    Texture = <LightMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseLightMap <
+    string UIName  = "Use ILM Map";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 401;
+> = false;
+
+uniform bool UseMatIDForRamp <
+    string UIName  = "Material ID Picks Ramp Row";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 402;
+> = false;
+
+uniform float ILMAoStrength <
+    string UIName   = "ILM AO Strength";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 403;
+> = 1.0;
+
+uniform bool UseVertexAO <
+    string UIName  = "AO From Vertex Color G";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 404;
+> = false;
+
+
+//-----------------------------------------------------------------------------
+//  Specular
+//-----------------------------------------------------------------------------
+uniform float SpecMode <
+    string UIName   = "Spec Mode  0=Off 1=Cel 2=Ramp 3=Hair";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 3.0; float UIStep = 1.0;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 500;
+> = 1.0;
+
+uniform vec3 SpecColor <
+    string UIName   = "Specular Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 501;
+> = {1.0, 1.0, 1.0};
+
+uniform float SpecIntensity <
+    string UIName   = "Specular Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.05;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 502;
+> = 1.0;
+
+uniform float SpecGloss <
+    string UIName   = "Specular Gloss";
+    string UIWidget = "Slider";
+    float  UIMin = 1.0; float UIMax = 256.0; float UIStep = 1.0;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 503;
+> = 40.0;
+
+uniform float SpecThreshold <
+    string UIName   = "Cel Spec Threshold";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 504;
+> = 0.5;
+
+uniform float SpecSoftness <
+    string UIName   = "Cel Spec Softness";
+    string UIWidget = "Slider";
+    float  UIMin = 0.001; float UIMax = 0.5; float UIStep = 0.005;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 505;
+> = 0.02;
+
+// GBFR: tint the highlight through a ramp instead of banding it
+uniform texture2D SpecRampMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Specular Ramp";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 506;
+>;
+uniform sampler2D SpecRampSampler = sampler_state {
+    Texture = <SpecRampMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform float SpecRampWidth <
+    string UIName   = "Specular Ramp Width";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 507;
+> = 0.5;
+
+
+//-----------------------------------------------------------------------------
+//  Hair anisotropic  (Kajiya-Kay, GBFR style)
+//-----------------------------------------------------------------------------
+uniform texture2D HairMask <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Hair Mask  R=shift G=ramp B=AO";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "6 - Hair";
+    int    UIOrder  = 600;
+>;
+uniform sampler2D HairMaskSampler = sampler_state {
+    Texture = <HairMask>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseHairMask <
+    string UIName  = "Use Hair Mask";
+    string UIGroup = "6 - Hair";
+    int    UIOrder = 601;
+> = false;
+
+uniform float AnisoShiftIntensity <
+    string UIName   = "Aniso Shift Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 0.01;
+    string UIGroup  = "6 - Hair";
+    int    UIOrder  = 602;
+> = 0.3;
+
+uniform float AnisoBias <
+    string UIName   = "Aniso Bias";
+    string UIWidget = "Slider";
+    float  UIMin = -1.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "6 - Hair";
+    int    UIOrder  = 603;
+> = 0.0;
+
+uniform float AnisoExponent <
+    string UIName   = "Aniso Exponent";
+    string UIWidget = "Slider";
+    float  UIMin = 1.0; float UIMax = 200.0; float UIStep = 1.0;
+    string UIGroup  = "6 - Hair";
+    int    UIOrder  = 604;
+> = 40.0;
+
+
+//-----------------------------------------------------------------------------
+//  Face  --  GBFR view-driven nose / cheek rim
+//    mask: R = right cheek, G = left nose, B = left cheek, A = right nose
+//-----------------------------------------------------------------------------
+uniform bool UseFaceRim <
+    string UIName  = "Enable Face Rim";
+    string UIGroup = "7 - Face";
+    int    UIOrder = 700;
+> = false;
+
+uniform texture2D FaceMask <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Face Mask  R=Rcheek G=Lnose B=Lcheek A=Rnose";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 701;
+>;
+uniform sampler2D FaceMaskSampler = sampler_state {
+    Texture = <FaceMask>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform vec3 FaceRimColor <
+    string UIName   = "Face Rim Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 702;
+> = {1.0, 0.95, 0.92};
+
+uniform float FaceRimIntensity <
+    string UIName   = "Face Rim Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 50.0; float UIStep = 0.5;
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 703;
+> = 6.0;
+
+// Head basis in world space -- drive from a head joint via the Python tool.
+uniform vec3 HeadForward <
+    string UIName  = "Head Forward";
+    string UIGroup = "7 - Face";
+    int    UIOrder = 704;
+> = {0.0, 0.0, 1.0};
+
+uniform vec3 HeadRight <
+    string UIName  = "Head Right";
+    string UIGroup = "7 - Face";
+    int    UIOrder = 705;
+> = {1.0, 0.0, 0.0};
+
+// Genshin-style SDF face shadow (light driven) -- complements the rim above
+uniform bool UseFaceSDF <
+    string UIName  = "Enable Face SDF Shadow";
+    string UIGroup = "7 - Face";
+    int    UIOrder = 706;
+> = false;
+
+uniform texture2D FaceSDFMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Face SDF Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 707;
+>;
+uniform sampler2D FaceSDFSampler = sampler_state {
+    Texture = <FaceSDFMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform float FaceSDFSoftness <
+    string UIName   = "Face SDF Softness";
+    string UIWidget = "Slider";
+    float  UIMin = 0.001; float UIMax = 0.3; float UIStep = 0.005;
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 708;
+> = 0.02;
+
+
+//-----------------------------------------------------------------------------
+//  Rim light  (GBFR: fresnel masked by up-facing)
+//-----------------------------------------------------------------------------
+uniform vec3 RimColor <
+    string UIName   = "Rim Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 800;
+> = {1.0, 1.0, 1.0};
+
+uniform float RimIntensity <
+    string UIName   = "Rim Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.05;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 801;
+> = 0.6;
+
+uniform float RimPower <
+    string UIName   = "Rim Power";
+    string UIWidget = "Slider";
+    float  UIMin = 0.5; float UIMax = 16.0; float UIStep = 0.1;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 802;
+> = 4.0;
+
+uniform float RimUpMask <
+    string UIName   = "Rim Up Mask";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 803;
+> = 1.0;
+
+uniform float RimFollowLight <
+    string UIName   = "Rim Follows Light";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 804;
+> = 0.0;
+
+
+//-----------------------------------------------------------------------------
+//  Emission
+//-----------------------------------------------------------------------------
+uniform texture2D EmissionMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Emission Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "9 - Emission";
+    int    UIOrder  = 900;
+>;
+uniform sampler2D EmissionSampler = sampler_state {
+    Texture = <EmissionMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseEmissionMap <
+    string UIName  = "Use Emission Map";
+    string UIGroup = "9 - Emission";
+    int    UIOrder = 901;
+> = false;
+
+uniform bool EmissionFromAlbedoAlpha <
+    string UIName  = "Emission From Albedo Alpha";
+    string UIGroup = "9 - Emission";
+    int    UIOrder = 902;
+> = false;
+
+uniform vec3 EmissionColor <
+    string UIName   = "Emission Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "9 - Emission";
+    int    UIOrder  = 903;
+> = {1.0, 1.0, 1.0};
+
+uniform float EmissionIntensity <
+    string UIName   = "Emission Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 10.0; float UIStep = 0.05;
+    string UIGroup  = "9 - Emission";
+    int    UIOrder  = 904;
+> = 1.0;
+
+
+//-----------------------------------------------------------------------------
+//  MatCap
+//-----------------------------------------------------------------------------
+uniform texture2D MatCapMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "MatCap Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "10 - MatCap";
+    int    UIOrder  = 1000;
+>;
+uniform sampler2D MatCapSampler = sampler_state {
+    Texture = <MatCapMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform bool UseMatCap <
+    string UIName  = "Use MatCap";
+    string UIGroup = "10 - MatCap";
+    int    UIOrder = 1001;
+> = false;
+
+uniform float MatCapIntensity <
+    string UIName   = "MatCap Intensity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 3.0; float UIStep = 0.05;
+    string UIGroup  = "10 - MatCap";
+    int    UIOrder  = 1002;
+> = 1.0;
+
+
+//-----------------------------------------------------------------------------
+//  Outline
+//-----------------------------------------------------------------------------
+uniform vec3 OutlineColor <
+    string UIName   = "Outline Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1100;
+> = {0.05, 0.03, 0.06};
+
+uniform float OutlineWidth <
+    string UIName   = "Outline Width";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.01;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1101;
+> = 0.3;
+
+uniform bool OutlineUseVertexColor <
+    string UIName  = "Width From Vertex Color R";
+    string UIGroup = "11 - Outline";
+    int    UIOrder = 1102;
+> = false;
+
+uniform bool OutlineUseSmoothNormal <
+    string UIName  = "Use Baked Smooth Normal";
+    string UIGroup = "11 - Outline";
+    int    UIOrder = 1103;
+> = false;
+
+uniform bool OutlineScreenSpace <
+    string UIName  = "Constant Screen Width";
+    string UIGroup = "11 - Outline";
+    int    UIOrder = 1104;
+> = true;
+
+uniform float OutlineDistanceFade <
+    string UIName   = "Width Fade Distance";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 200.0; float UIStep = 0.5;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1105;
+> = 0.0;
+
+uniform float OutlineZOffset <
+    string UIName   = "Outline Z Offset";
+    string UIWidget = "Slider";
+    float  UIMin = -0.01; float UIMax = 0.01; float UIStep = 0.0001;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1106;
+> = 0.0;
+
+uniform bool OutlineTintFromAlbedo <
+    string UIName  = "Tint Outline From Albedo";
+    string UIGroup = "11 - Outline";
+    int    UIOrder = 1107;
+> = false;
+
+uniform float OutlineTintAmount <
+    string UIName   = "Outline Tint Amount";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1108;
+> = 0.5;
+
+// GBFR: triplanar noise breaks the line up so it reads as a drawn stroke
+uniform texture2D OutlineNoiseMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Outline Noise Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1109;
+>;
+uniform sampler2D OutlineNoiseSampler = sampler_state {
+    Texture = <OutlineNoiseMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseOutlineNoise <
+    string UIName  = "Use Outline Noise";
+    string UIGroup = "11 - Outline";
+    int    UIOrder = 1110;
+> = false;
+
+uniform float OutlineNoiseScale <
+    string UIName   = "Outline Noise Scale";
+    string UIWidget = "Slider";
+    float  UIMin = 0.01; float UIMax = 20.0; float UIStep = 0.01;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1111;
+> = 1.0;
+
+uniform float OutlineNoiseCutoff <
+    string UIName   = "Outline Noise Cutoff";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1112;
+> = 0.35;
+
+
+//-----------------------------------------------------------------------------
+//  Lights  (Maya binds these from the scene)
+//-----------------------------------------------------------------------------
+uniform int   Light0Type      : LIGHTTYPE      < string Object = "Light 0"; string UIWidget = "None"; > = 4;
+uniform vec3  Light0Color     : LIGHTCOLOR     < string Object = "Light 0"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light0Intensity : LIGHTINTENSITY < string Object = "Light 0"; > = 1.0;
+uniform vec3  Light0Pos       : POSITION       < string Object = "Light 0"; string Space = "World"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light0Dir       : DIRECTION      < string Object = "Light 0"; > = {0.0, -1.0, 0.0};
+uniform float Light0Decay     : DECAYRATE      < string Object = "Light 0"; > = 0.0;
+uniform float Light0Cone      : HOTSPOT        < string Object = "Light 0"; > = 0.46;
+uniform float Light0Falloff   : FALLOFF        < string Object = "Light 0"; > = 0.7;
+
+uniform int   Light1Type      : LIGHTTYPE      < string Object = "Light 1"; string UIWidget = "None"; > = 4;
+uniform vec3  Light1Color     : LIGHTCOLOR     < string Object = "Light 1"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light1Intensity : LIGHTINTENSITY < string Object = "Light 1"; > = 0.0;
+uniform vec3  Light1Pos       : POSITION       < string Object = "Light 1"; string Space = "World"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light1Dir       : DIRECTION      < string Object = "Light 1"; > = {0.0, -1.0, 0.0};
+uniform float Light1Decay     : DECAYRATE      < string Object = "Light 1"; > = 0.0;
+uniform float Light1Cone      : HOTSPOT        < string Object = "Light 1"; > = 0.46;
+uniform float Light1Falloff   : FALLOFF        < string Object = "Light 1"; > = 0.7;
+
+uniform int   Light2Type      : LIGHTTYPE      < string Object = "Light 2"; string UIWidget = "None"; > = 4;
+uniform vec3  Light2Color     : LIGHTCOLOR     < string Object = "Light 2"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light2Intensity : LIGHTINTENSITY < string Object = "Light 2"; > = 0.0;
+uniform vec3  Light2Pos       : POSITION       < string Object = "Light 2"; string Space = "World"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light2Dir       : DIRECTION      < string Object = "Light 2"; > = {0.0, -1.0, 0.0};
+uniform float Light2Decay     : DECAYRATE      < string Object = "Light 2"; > = 0.0;
+uniform float Light2Cone      : HOTSPOT        < string Object = "Light 2"; > = 0.46;
+uniform float Light2Falloff   : FALLOFF        < string Object = "Light 2"; > = 0.7;
+
+uniform mat4 gShadowVP : ViewProjection < string UIWidget = "None"; >;
+
+
+//-----------------------------------------------------------------------------
+//  Vertex streams / varyings
+//-----------------------------------------------------------------------------
+attribute APPDATA
+{
+    vec3 inPosition : POSITION;
+    vec3 inNormal   : NORMAL;
+    vec3 inTangent  : TANGENT;
+    vec3 inBinormal : BINORMAL;
+    vec2 inUV0      : TEXCOORD0;
+    vec2 inOctNormal : TEXCOORD1;
+    vec4 inColor0   : COLOR0;
+};
+
+attribute SHADERDATA
+{
+    vec3 wPos;
+    vec3 wNormal;
+    vec3 wTangent;
+    vec3 wBinormal;
+    vec2 uv0;
+    vec4 vcol;
+};
+
+attribute OUTLINEDATA
+{
+    vec3 oPos;
+    vec2 uv0;
+};
+
+attribute PIXELDATA       { vec4 outColor : COLOR0; };
+attribute PIXELDATA_OL    { vec4 outColor : COLOR0; };
+attribute PIXELDATA_SHDW  { vec4 outColor : COLOR0; };
+
+
+//=============================================================================
+//  Shared helpers
+//=============================================================================
+GLSLShader Common
+{
+    // Maya hands GLSL a flipped V.
+    vec2 flipUV(vec2 uv) { return vec2(uv.x, 1.0 - uv.y); }
+
+    float sat(float x) { return clamp(x, 0.0, 1.0); }
+    vec3  sat3(vec3 v)  { return clamp(v, 0.0, 1.0); }
+
+    vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
+
+    // Resolve light i into a world-space direction (surface -> light),
+    // a colour premultiplied by intensity, and a distance attenuation.
+    void resolveLight(int   type,
+                      vec3  lcolor,
+                      float lintensity,
+                      vec3  lpos,
+                      vec3  ldir,
+                      float ldecay,
+                      float lcone,
+                      float lfalloff,
+                      vec3  wpos,
+                      out vec3  L,
+                      out vec3  radiance,
+                      out float isAmbient)
+    {
+        isAmbient = 0.0;
+        float atten = 1.0;
+
+        if (type == 4) {              // directional
+            L = normalize(-ldir);
+        } else if (type == 5) {       // ambient
+            L = vec3(0.0, 1.0, 0.0);
+            isAmbient = 1.0;
+        } else {                      // point / spot
+            vec3 toLight = lpos - wpos;
+            float dist   = max(length(toLight), 1e-4);
+            L = toLight / dist;
+
+            if (ldecay > 0.0) {
+                atten = 1.0 / pow(dist, ldecay);
+            }
+            if (type == 2) {          // spot cone
+                float cosAng = dot(normalize(ldir), -L);
+                float inner  = cos(max(lcone - lfalloff, 0.0));
+                float outer  = cos(lcone);
+                atten *= smoothstep(outer, inner, cosAng);
+            }
+        }
+
+        radiance = lcolor * lintensity * atten;
+    }
+
+    // Diffuse band: half-lambert -> threshold -> ramp texture or two-tone mix.
+    vec3 celDiffuse(float ndl, float aoMask, float rampRow, bool useRamp,
+                    sampler2D rampSmp, vec3 shadowCol,
+                    float threshold, float softness, float halfLambertAmt)
+    {
+        float lambert = mix(sat(ndl), ndl * 0.5 + 0.5, halfLambertAmt);
+        float lit     = sat(lambert * aoMask);
+
+        if (useRamp) {
+            // Ramp rows are stacked vertically; sample the middle of the row.
+            float v = (rampRow + 0.5) / max(RampRows, 1.0);
+            return texture(rampSmp, flipUV(vec2(lit, v))).rgb;
+        }
+
+        float band = smoothstep(threshold - softness, threshold + softness, lit);
+        return mix(shadowCol, vec3(1.0), band);
+    }
+
+    // Kajiya-Kay strand highlight.
+    float strandSpecular(vec3 T, vec3 H, float exponent)
+    {
+        float TdotH = dot(T, H);
+        float sinTH = sqrt(max(0.0, 1.0 - TdotH * TdotH));
+        return pow(sinTH, exponent);
+    }
+
+    // Unpack a unit vector from the 2 floats stored in a UV set.
+    vec3 octDecode(vec2 f)
+    {
+        f = f * 2.0 - 1.0;
+        vec3 n = vec3(f.x, f.y, 1.0 - abs(f.x) - abs(f.y));
+        float t = max(-n.z, 0.0);
+        n.x += (n.x >= 0.0) ? -t : t;
+        n.y += (n.y >= 0.0) ? -t : t;
+        return normalize(n);
+    }
+
+    // Object-space triplanar sample, used to break the outline up.
+    float triplanarNoise(vec3 opos, vec3 onormal, sampler2D smp, float scale)
+    {
+        vec3 t    = pow(abs(onormal), vec3(2.0));
+        vec3 mask = t / max(t.x + t.y + t.z, 1e-4);
+        vec3 p    = opos * scale;
+
+        float cz = texture(smp, flipUV(p.xy)).r * mask.z;
+        float cy = texture(smp, flipUV(p.xz)).r * mask.y;
+        float cx = texture(smp, flipUV(p.yz)).r * mask.x;
+        return cx + cy + cz;
+    }
+}
+
+
+//=============================================================================
+//  Main shading  --  vertex
+//=============================================================================
+GLSLShader VS_Main
+{
+    void main()
+    {
+        vec4 wp = gWorldXf * vec4(inPosition, 1.0);
+
+        VS_OUT.wPos      = wp.xyz;
+        VS_OUT.wNormal   = normalize((gWorldIT * vec4(inNormal,   0.0)).xyz);
+        VS_OUT.wTangent  = normalize((gWorldXf * vec4(inTangent,  0.0)).xyz);
+        VS_OUT.wBinormal = normalize((gWorldXf * vec4(inBinormal, 0.0)).xyz);
+        VS_OUT.uv0       = inUV0;
+        VS_OUT.vcol      = inColor0;
+
+        gl_Position = gWVPXf * vec4(inPosition, 1.0);
+    }
+}
+
+
+//=============================================================================
+//  Main shading  --  pixel
+//=============================================================================
+GLSLShader PS_Main
+{
+    void main()
+    {
+        vec2 uv = PS_IN.uv0;
+
+        //---- albedo -------------------------------------------------------
+        vec4 albedoTex = vec4(1.0);
+        if (UseAlbedoMap) {
+            albedoTex = texture(AlbedoSampler, flipUV(uv));
+            if (AlbedoIsSRGB) albedoTex.rgb = toLinear(albedoTex.rgb);
+        }
+        if (UseAlphaClip && albedoTex.a < AlphaCutoff) discard;
+
+        vec3 albedo = albedoTex.rgb * BaseColor;
+
+        //---- ILM mask -----------------------------------------------------
+        vec4 ilm = vec4(1.0, 1.0, 0.5, 0.0);
+        if (UseLightMap) ilm = texture(LightMapSampler, flipUV(uv));
+
+        float specMask   = UseLightMap ? ilm.r : 1.0;
+        float specSize   = UseLightMap ? ilm.b : 0.5;
+        float matID      = UseLightMap ? ilm.a : 0.0;
+
+        float aoMask = 1.0;
+        if (UseLightMap) aoMask *= mix(1.0, ilm.g, ILMAoStrength);
+        if (UseVertexAO) aoMask *= PS_IN.vcol.g;
+        aoMask = sat(aoMask);
+
+        float rampRow = UseMatIDForRamp
+                      ? floor(sat(matID) * max(RampRows - 1.0, 0.0) + 0.5)
+                      : RampRowIndex;
+
+        //---- basis --------------------------------------------------------
+        vec3 N      = normalize(PS_IN.wNormal);
+        vec3 camPos = gViewIXf[3].xyz;
+        vec3 V      = normalize(camPos - PS_IN.wPos);
+
+        //---- key light ----------------------------------------------------
+        int   kType  = Light0Type;
+        vec3  kColor = Light0Color;   float kInt = Light0Intensity;
+        vec3  kPos   = Light0Pos;     vec3  kDir = Light0Dir;
+        float kDecay = Light0Decay;   float kCone = Light0Cone;  float kFall = Light0Falloff;
+
+        if (KeyLightIndex > 1.5) {
+            kType = Light2Type; kColor = Light2Color; kInt = Light2Intensity;
+            kPos  = Light2Pos;  kDir   = Light2Dir;
+            kDecay = Light2Decay; kCone = Light2Cone; kFall = Light2Falloff;
+        } else if (KeyLightIndex > 0.5) {
+            kType = Light1Type; kColor = Light1Color; kInt = Light1Intensity;
+            kPos  = Light1Pos;  kDir   = Light1Dir;
+            kDecay = Light1Decay; kCone = Light1Cone; kFall = Light1Falloff;
+        }
+
+        vec3  L, keyRadiance;  float keyAmbient;
+        resolveLight(kType, kColor, kInt, kPos, kDir, kDecay, kCone, kFall,
+                     PS_IN.wPos, L, keyRadiance, keyAmbient);
+
+        if (UseLightOverride) {
+            L = normalize(LightDirOverride);
+            keyAmbient = 0.0;
+            if (kInt <= 0.0) keyRadiance = vec3(1.0);
+        }
+
+        float ndl = dot(N, L);
+        vec3  H   = normalize(L + V);
+
+        //---- diffuse band -------------------------------------------------
+        vec3 band = celDiffuse(ndl, aoMask, rampRow, UseRampMap, RampSampler,
+                               ShadowColor, ShadowThreshold, ShadowSoftness, HalfLambert);
+
+        //---- face SDF overrides the band on the face ----------------------
+        if (UseFaceSDF) {
+            vec3 F = normalize(HeadForward);
+            vec3 R = normalize(HeadRight);
+            vec3 U = normalize(cross(F, R));
+
+            vec3  Lh    = normalize(L - dot(L, U) * U);   // light on the head's horizontal plane
+            float FdotL = dot(F, Lh);
+            float RdotL = dot(R, Lh);
+
+            vec2 sdfUV = (RdotL > 0.0) ? uv : vec2(1.0 - uv.x, uv.y);
+            float sdf  = texture(FaceSDFSampler, flipUV(sdfUV)).r;
+
+            float threshold = (1.0 - FdotL) * 0.5;
+            float faceLit   = smoothstep(threshold - FaceSDFSoftness,
+                                         threshold + FaceSDFSoftness, sdf);
+            band = mix(ShadowColor, vec3(1.0), faceLit);
+        }
+
+        vec3 diffuse = albedo * band * keyRadiance;
+
+        //---- specular -----------------------------------------------------
+        vec3 specular = vec3(0.0);
+        int  smode    = int(SpecMode + 0.5);
+
+        if (smode == 3) {
+            // Kajiya-Kay hair
+            float shift = 0.0;
+            float hairAO = 1.0;
+            float hairRamp = 1.0;
+            if (UseHairMask) {
+                vec4 hm  = texture(HairMaskSampler, flipUV(uv));
+                shift    = (hm.r * 2.0 - 1.0) * AnisoShiftIntensity;
+                hairRamp = hm.g;
+                hairAO   = hm.b;
+            }
+            vec3  T   = normalize(PS_IN.wBinormal);   // hair strands run along V
+            vec3  Ts  = normalize(N * (shift + AnisoBias) + T);
+            float s   = strandSpecular(Ts, H, AnisoExponent);
+            specular  = SpecColor * s * SpecIntensity * sat(ndl) * specMask * hairAO;
+            diffuse  *= mix(1.0, hairRamp, float(UseHairMask));
+        }
+        else if (smode == 2) {
+            // GBFR: tint the highlight through a ramp
+            float raw   = pow(sat(dot(N, H)), SpecGloss);
+            float w     = sat(SpecRampWidth);
+            float rampU = sat(w * raw - w + 1.0);
+            vec3  tint  = texture(SpecRampSampler, flipUV(vec2(rampU, 0.5))).rgb;
+            specular    = SpecColor * tint * raw * SpecIntensity * specMask * sat(ndl);
+        }
+        else if (smode == 1) {
+            // hard cel highlight
+            float gloss = mix(SpecGloss * 0.25, SpecGloss * 2.0, specSize);
+            float raw   = pow(sat(dot(N, H)), gloss);
+            float step_ = smoothstep(SpecThreshold - SpecSoftness,
+                                     SpecThreshold + SpecSoftness, raw);
+            specular    = SpecColor * step_ * SpecIntensity * specMask * sat(ndl);
+        }
+        specular *= keyRadiance;
+
+        //---- rim ----------------------------------------------------------
+        float fres   = pow(1.0 - sat(dot(N, V)), RimPower);
+        float upMask = mix(1.0, sat(dot(N, vec3(0.0, 1.0, 0.0))), RimUpMask);
+        float litAmt = mix(1.0, sat(ndl * 0.5 + 0.5), RimFollowLight);
+        vec3  rim    = RimColor * fres * upMask * litAmt * RimIntensity;
+
+        //---- GBFR face rim (camera driven) --------------------------------
+        vec3 faceRim = vec3(0.0);
+        if (UseFaceRim) {
+            vec3 Vh = normalize(vec3(V.x, 0.0, V.z));
+            vec3 F  = normalize(HeadForward);
+            vec3 R  = normalize(HeadRight);
+
+            float VdotF  = sat(dot(Vh, F));
+            float side   = (dot(Vh, R) < 0.0) ? 0.0 : 1.0;
+            float turned = 1.0 - VdotF;
+
+            vec4 fm = texture(FaceMaskSampler, flipUV(uv));
+            // strip stray low values the way GBFR does
+            float rC = fm.r > 0.005 ? fm.r : 0.0;   // right cheek
+            float lN = fm.g > 0.005 ? fm.g : 0.0;   // left nose
+            float lC = fm.b > 0.005 ? fm.b : 0.0;   // left cheek
+            float rN = fm.a > 0.005 ? fm.a : 0.0;   // right nose
+
+            float nose  = lN * turned * side + rN * turned * (1.0 - side);
+            float cheek = lC * turned * side + rC * turned * (1.0 - side);
+            faceRim = FaceRimColor * (nose + cheek) * FaceRimIntensity;
+        }
+
+        //---- fill lights --------------------------------------------------
+        vec3 fill = vec3(0.0);
+        for (int i = 1; i < 3; ++i) {
+            int   fType;  vec3 fColor;  float fInt;
+            vec3  fPos;   vec3 fDir;    float fDecay, fCone, fFall;
+
+            if (i == 1) {
+                fType = Light1Type; fColor = Light1Color; fInt = Light1Intensity;
+                fPos  = Light1Pos;  fDir   = Light1Dir;
+                fDecay = Light1Decay; fCone = Light1Cone; fFall = Light1Falloff;
+            } else {
+                fType = Light2Type; fColor = Light2Color; fInt = Light2Intensity;
+                fPos  = Light2Pos;  fDir   = Light2Dir;
+                fDecay = Light2Decay; fCone = Light2Cone; fFall = Light2Falloff;
+            }
+            if (abs(float(i) - KeyLightIndex) < 0.5) continue;
+            if (fInt <= 0.0) continue;
+
+            vec3 fL, fRad;  float fAmb;
+            resolveLight(fType, fColor, fInt, fPos, fDir, fDecay, fCone, fFall,
+                         PS_IN.wPos, fL, fRad, fAmb);
+
+            fill += (fAmb > 0.5) ? fRad : fRad * sat(dot(N, fL));
+        }
+        fill *= albedo * FillLightScale;
+
+        //---- matcap -------------------------------------------------------
+        vec3 matcap = vec3(0.0);
+        if (UseMatCap) {
+            vec3 vN = normalize((gViewXf * vec4(N, 0.0)).xyz);
+            vec2 mcUV = vN.xy * 0.5 + 0.5;
+            matcap = texture(MatCapSampler, flipUV(mcUV)).rgb * MatCapIntensity;
+        }
+
+        //---- emission -----------------------------------------------------
+        vec3 emission = vec3(0.0);
+        if (UseEmissionMap) {
+            emission = texture(EmissionSampler, flipUV(uv)).rgb;
+        } else if (EmissionFromAlbedoAlpha) {
+            emission = albedo * albedoTex.a;
+        }
+        emission *= EmissionColor * EmissionIntensity;
+
+        //---- combine ------------------------------------------------------
+        vec3 color = diffuse
+                   + specular
+                   + rim * albedo
+                   + faceRim
+                   + fill
+                   + matcap * albedo
+                   + emission
+                   + albedo * AmbientColor;
+
+        outColor = vec4(color, 1.0);
+    }
+}
+
+
+//=============================================================================
+//  Outline  --  inverted hull
+//=============================================================================
+GLSLShader VS_Outline
+{
+    void main()
+    {
+        vec3 nrm = inNormal;
+
+        // Baked smooth normal arrives octahedral-encoded in the 2nd UV set,
+        // expressed in tangent space so it survives skinning.
+        if (OutlineUseSmoothNormal) {
+            vec3 tsN = octDecode(inOctNormal);
+            mat3 TBN = mat3(normalize(inTangent),
+                            normalize(inBinormal),
+                            normalize(inNormal));
+            nrm = normalize(TBN * tsN);
+        }
+
+        vec4 wp = gWorldXf * vec4(inPosition, 1.0);
+        vec3 wN = normalize((gWorldIT * vec4(nrm, 0.0)).xyz);
+
+        float width = OutlineWidth * 0.01;
+        if (OutlineUseVertexColor) width *= inColor0.r;
+
+        // Keep the line a constant thickness on screen.
+        if (OutlineScreenSpace) {
+            float dist = length(gViewIXf[3].xyz - wp.xyz);
+            width *= dist;
+        }
+        // Optional extra falloff so distant characters lose their outline.
+        if (OutlineDistanceFade > 0.0) {
+            float dist = length(gViewIXf[3].xyz - wp.xyz);
+            width *= 1.0 - smoothstep(0.0, OutlineDistanceFade, dist);
+        }
+
+        wp.xyz += wN * width;
+
+        vec4 cp = gVPXf * wp;
+        cp.z   -= OutlineZOffset * cp.w;
+
+        VS_OUT.oPos = inPosition;
+        VS_OUT.uv0  = inUV0;
+
+        gl_Position = cp;
+    }
+}
+
+GLSLShader PS_Outline
+{
+    void main()
+    {
+        // OGSFX cannot set "Cull Front", so drop front faces here instead.
+        if (gl_FrontFacing) discard;
+
+        vec3 col = OutlineColor;
+
+        if (OutlineTintFromAlbedo && UseAlbedoMap) {
+            vec3 a = texture(AlbedoSampler, flipUV(PS_IN.uv0)).rgb;
+            if (AlbedoIsSRGB) a = toLinear(a);
+            col = mix(col, col * a, OutlineTintAmount);
+        }
+
+        if (UseOutlineNoise) {
+            // Reconstructing the object normal from derivatives keeps the
+            // outline varyings small.
+            vec3 n = normalize(cross(dFdx(PS_IN.oPos), dFdy(PS_IN.oPos)));
+            float noise = triplanarNoise(PS_IN.oPos, n, OutlineNoiseSampler, OutlineNoiseScale);
+            if (noise - OutlineNoiseCutoff < 0.0) discard;
+        }
+
+        outColor = vec4(col, 1.0);
+    }
+}
+
+
+//=============================================================================
+//  Shadow pass
+//=============================================================================
+GLSLShader PS_Shadow
+{
+    void main()
+    {
+        vec4  sp    = gShadowVP * vec4(PS_IN.wPos, 1.0);
+        float d     = sp.z / sp.w;
+        float depth = 0.5 * (d + fwidth(d)) + 0.5;
+        outColor    = vec4(depth);
+    }
+}
+
+
+//=============================================================================
+//  Techniques
+//=============================================================================
+
+// Shading only. Use this if multi-pass outline misbehaves on your GPU.
+technique Anime
+<
+    string variableNameAsAttributeName = "true";
+>
+{
+    pass pShade < string drawContext = "colorPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA) = { Common, PS_Main };
+    }
+    pass pShadow < string drawContext = "shadowPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA_SHDW) = { Common, PS_Shadow };
+    }
+}
+
+// Shading + inverted-hull outline.
+technique AnimeOutline
+<
+    string variableNameAsAttributeName = "true";
+>
+{
+    pass pShade < string drawContext = "colorPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA) = { Common, PS_Main };
+    }
+    pass pOutline < string drawContext = "colorPass"; >
+    {
+        VertexShader (in APPDATA, out OUTLINEDATA VS_OUT) = { Common, VS_Outline };
+        PixelShader  (in OUTLINEDATA PS_IN, out PIXELDATA_OL) = { Common, PS_Outline };
+    }
+    pass pShadow < string drawContext = "shadowPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA_SHDW) = { Common, PS_Shadow };
+    }
+}

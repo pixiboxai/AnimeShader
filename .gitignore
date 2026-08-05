@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+validate_result.txt
+reference/
+docs/

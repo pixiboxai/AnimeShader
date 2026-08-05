@@ -1,0 +1,33 @@
+{
+  "name": "gbfr_like",
+  "description": "Granblue Fantasy Relink flavour: soft band, ramp-tinted highlight, up-masked rim, broken-up outline.",
+  "technique": "AnimeOutline",
+  "parameters": {
+    "AmbientColor": [0.16, 0.16, 0.2],
+    "BaseColor": [1.0, 1.0, 1.0],
+    "FillLightScale": 0.4,
+    "HalfLambert": 1.0,
+    "OutlineColor": [0.09, 0.06, 0.08],
+    "OutlineNoiseCutoff": 0.3,
+    "OutlineNoiseScale": 4.0,
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.6,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.28,
+    "OutlineZOffset": 0.0,
+    "RimColor": [1.0, 0.98, 0.95],
+    "RimFollowLight": 0.25,
+    "RimIntensity": 0.8,
+    "RimPower": 3.5,
+    "RimUpMask": 1.0,
+    "ShadowColor": [0.62, 0.58, 0.68],
+    "ShadowSoftness": 0.08,
+    "ShadowThreshold": 0.48,
+    "SpecGloss": 45.0,
+    "SpecIntensity": 1.1,
+    "SpecMode": 2.0,
+    "SpecRampWidth": 0.55,
+    "UseOutlineNoise": 1
+  }
+}

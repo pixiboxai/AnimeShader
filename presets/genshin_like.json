@@ -1,0 +1,32 @@
+{
+  "name": "genshin_like",
+  "description": "Hard two-tone cel with a crisp terminator, stepped highlight and a heavy even outline.",
+  "technique": "AnimeOutline",
+  "parameters": {
+    "AmbientColor": [0.2, 0.2, 0.24],
+    "BaseColor": [1.0, 1.0, 1.0],
+    "FillLightScale": 0.25,
+    "HalfLambert": 1.0,
+    "OutlineColor": [0.05, 0.03, 0.05],
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.35,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.35,
+    "OutlineZOffset": 0.0,
+    "RimColor": [1.0, 1.0, 1.0],
+    "RimFollowLight": 0.6,
+    "RimIntensity": 0.5,
+    "RimPower": 5.0,
+    "RimUpMask": 0.3,
+    "ShadowColor": [0.55, 0.5, 0.66],
+    "ShadowSoftness": 0.012,
+    "ShadowThreshold": 0.52,
+    "SpecGloss": 60.0,
+    "SpecIntensity": 1.4,
+    "SpecMode": 1.0,
+    "SpecSoftness": 0.01,
+    "SpecThreshold": 0.55,
+    "UseOutlineNoise": 0
+  }
+}
