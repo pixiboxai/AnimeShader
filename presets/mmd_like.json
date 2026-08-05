@@ -1,25 +1,44 @@
 {
-  "name": "mmd_like",
   "description": "Soft MMD/Toon look: gentle terminator, weak rim, thin outline, no noise break-up.",
-  "technique": "AnimeOutline",
+  "name": "mmd_like",
   "parameters": {
-    "AmbientColor": [0.28, 0.28, 0.32],
-    "BaseColor": [1.0, 1.0, 1.0],
+    "AmbientColor": [
+      0.28,
+      0.28,
+      0.32
+    ],
+    "BaseColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
     "FillLightScale": 0.5,
     "HalfLambert": 1.0,
-    "OutlineColor": [0.14, 0.1, 0.14],
+    "OutlineColor": [
+      0.14,
+      0.1,
+      0.14
+    ],
     "OutlineScreenSpace": 1,
     "OutlineTintAmount": 0.3,
     "OutlineTintFromAlbedo": 1,
     "OutlineUseSmoothNormal": 1,
     "OutlineWidth": 0.16,
     "OutlineZOffset": 0.0,
-    "RimColor": [1.0, 1.0, 1.0],
+    "RimColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
     "RimFollowLight": 0.4,
     "RimIntensity": 0.3,
     "RimPower": 3.0,
     "RimUpMask": 0.5,
-    "ShadowColor": [0.75, 0.72, 0.8],
+    "ShadowColor": [
+      0.75,
+      0.72,
+      0.8
+    ],
     "ShadowSoftness": 0.14,
     "ShadowThreshold": 0.45,
     "SpecGloss": 25.0,
@@ -28,5 +47,7 @@
     "SpecSoftness": 0.06,
     "SpecThreshold": 0.6,
     "UseOutlineNoise": 0
-  }
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
 }

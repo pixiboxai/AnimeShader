@@ -17,6 +17,7 @@ PRESET_DIR = os.path.join(PROJECT_ROOT, "presets")
 ICON_DIR = os.path.join(PROJECT_ROOT, "icons")
 
 ANIME_SHADER = os.path.join(SHADER_DIR, "GNTAnime.ogsfx")
+EYE_SHADER = os.path.join(SHADER_DIR, "GNTAnimeEye.ogsfx")
 
 # Vertex streams the shader reads.
 #   COLOR0    -> artist paint (R = outline width, G = AO)

@@ -63,7 +63,8 @@ presets.apply(node, "gbfr_like")
 ## Cấu trúc
 
 ```
-shaders/GNTAnime.ogsfx      shader chính (2 technique: Anime, AnimeOutline)
+shaders/GNTAnime.ogsfx      shader thân/tóc/mặt (2 technique: Anime, AnimeOutline)
+shaders/GNTAnimeEye.ogsfx   shader mắt (technique AnimeEye)
 scripts/gntshader/
     core/env.py             đường dẫn, tên color set
     core/plugin.py          nạp glslShader, kiểm tra renderer
@@ -72,11 +73,40 @@ scripts/gntshader/
     utils/mesh.py           bake smooth normal (port từ SmoothNormal.cs)
     utils/qt.py             shim PySide2 / PySide6
     ui/main_window.py       cửa sổ công cụ
-presets/*.json              3 preset khởi điểm
+presets/*.json              4 preset khởi điểm
+tests/                      test headless
 validate.py                 kiểm tra shader compile (chạy trong Maya GUI)
 install.py                  ghi file .mod vào thư mục modules của Maya
 GNTShader.mod               mẫu module (install.py tự sinh bản có đường dẫn thật)
 ```
+
+---
+
+## Shader mắt
+
+Mắt cần mô hình riêng nên tách thành `GNTAnimeEye.ogsfx`, không nhồi vào shader chính:
+
+- **Iris parallax** — dịch UV iris theo hướng nhìn trong tangent space, làm mống mắt như
+  nằm sau giác mạc. `ParallaxSign` đổi giữa lõm (mặc định) và lồi.
+- **Highlight trượt theo người xem** — `HighlightFollowView` từ 0 (dính chặt vào mesh)
+  đến 1 (trượt như phản chiếu thật). Có xoay, có scale, và catchlight thứ hai nhỏ hơn.
+- **Iris ramp** dọc, **limbal ring**, pupil chỉnh được size/softness.
+- **Bóng mí mắt** — gradient tối dần ở đỉnh nhãn cầu.
+- `Unlit` để tắt hẳn ảnh hưởng đèn scene, kiểu mắt phẳng của anime.
+
+Dùng: tạo shader trỏ vào file đó rồi áp preset `eye_default`.
+
+```python
+from gntshader.core import shader, presets, env
+node, sg = shader.create(name="GNTEye", shader_file=env.EYE_SHADER,
+                         technique="AnimeEye")
+shader.assign(node)
+presets.apply(node, "eye_default")
+```
+
+Preset giờ có trường `shader` ghi rõ nó thuộc effect nào. Áp preset mắt lên shader thân
+thì mọi key đều trượt và look sẽ sai mà không báo gì — nên `presets.apply()` cảnh báo
+khi preset không khớp shader đang chạy, và test `test_shader_contract.py` chặn từ đầu.
 
 ---
 

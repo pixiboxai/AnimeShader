@@ -38,6 +38,17 @@ def apply(node, preset, skip_textures=False):
             raise ValueError("Unknown preset: {0}".format(preset))
         preset = load_file(files[preset])
 
+    # A preset built for the eye shader will silently do nothing on the body
+    # shader (every key gets skipped), so say so up front.
+    wanted = preset.get("shader")
+    if wanted:
+        current = os.path.basename(cmds.getAttr(node + ".shader") or "")
+        if current and current != wanted:
+            cmds.warning(
+                "GNTShader: preset '{0}' is for {1}, but {2} is running {3}.".format(
+                    preset.get("name", "?"), wanted, node, current)
+            )
+
     technique = preset.get("technique")
     if technique:
         shader.set_technique(node, technique)
@@ -68,6 +79,7 @@ def capture(node, name, description="", directory=None, include_textures=False):
     payload = {
         "name": name,
         "description": description,
+        "shader": os.path.basename(cmds.getAttr(node + ".shader") or ""),
         "technique": shader.technique(node),
         "parameters": params,
     }

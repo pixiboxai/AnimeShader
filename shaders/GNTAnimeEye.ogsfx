@@ -1,0 +1,524 @@
+#version 410
+
+//=============================================================================
+//  GNTAnimeEye.ogsfx  --  anime eye shader for Maya Viewport 2.0
+//
+//  Companion to GNTAnime.ogsfx. Eyes want their own model: a parallax iris
+//  that sits behind a cornea, a highlight that slides with the viewer, and
+//  almost no diffuse shading.
+//
+//  UV layout: the iris is assumed to be a disc centred on IrisCenter, with
+//  radius 0.5 * IrisScale in UV space. Adjust IrisCenter/IrisScale to match
+//  however the eye was unwrapped.
+//
+//  Note on the highlight: game eye shaders usually draw the catchlight with
+//  depth test off so it never gets hidden. OGSFX has no render-state block,
+//  so it is composited in the pixel shader instead -- which is what most
+//  eye shaders do anyway.
+//=============================================================================
+
+
+//-----------------------------------------------------------------------------
+//  System
+//-----------------------------------------------------------------------------
+uniform mat4 gWVPXf   : WorldViewProjection    < string UIWidget = "None"; >;
+uniform mat4 gWorldXf : World                  < string UIWidget = "None"; >;
+uniform mat4 gWorldIT : WorldInverseTranspose  < string UIWidget = "None"; >;
+uniform mat4 gViewIXf : ViewInverse            < string UIWidget = "None"; >;
+uniform mat4 gVPXf    : ViewProjection         < string UIWidget = "None"; >;
+
+uniform int   Light0Type      : LIGHTTYPE      < string Object = "Light 0"; string UIWidget = "None"; > = 4;
+uniform vec3  Light0Color     : LIGHTCOLOR     < string Object = "Light 0"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light0Intensity : LIGHTINTENSITY < string Object = "Light 0"; > = 1.0;
+uniform vec3  Light0Dir       : DIRECTION      < string Object = "Light 0"; > = {0.0, -1.0, 0.0};
+uniform vec3  Light0Pos       : POSITION       < string Object = "Light 0"; string Space = "World"; > = {0.0, 100.0, 0.0};
+
+uniform mat4 gShadowVP : ViewProjection < string UIWidget = "None"; >;
+
+
+//-----------------------------------------------------------------------------
+//  1 - Sclera
+//-----------------------------------------------------------------------------
+uniform vec3 ScleraColor <
+    string UIName = "Sclera Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "1 - Sclera"; int UIOrder = 100;
+> = {0.95, 0.94, 0.95};
+
+uniform texture2D ScleraMap <
+    string ResourceName = ""; string ResourceType = "2D";
+    string UIName = "Sclera Map"; string UIWidget = "FilePicker";
+    string UIGroup = "1 - Sclera"; int UIOrder = 101;
+>;
+uniform sampler2D ScleraSampler = sampler_state {
+    Texture = <ScleraMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform bool UseScleraMap <
+    string UIName = "Use Sclera Map";
+    string UIGroup = "1 - Sclera"; int UIOrder = 102;
+> = false;
+
+// Eyelid contact shadow: darkens the top of the eyeball.
+uniform vec3 LidShadowColor <
+    string UIName = "Lid Shadow Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "1 - Sclera"; int UIOrder = 103;
+> = {0.55, 0.5, 0.6};
+
+uniform float LidShadowAmount <
+    string UIName = "Lid Shadow Amount"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "1 - Sclera"; int UIOrder = 104;
+> = 0.35;
+
+uniform float LidShadowHeight <
+    string UIName = "Lid Shadow Height"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "1 - Sclera"; int UIOrder = 105;
+> = 0.65;
+
+
+//-----------------------------------------------------------------------------
+//  2 - Iris
+//-----------------------------------------------------------------------------
+uniform vec2 IrisCenter <
+    string UIName = "Iris Center (UV)";
+    string UIGroup = "2 - Iris"; int UIOrder = 200;
+> = {0.5, 0.5};
+
+uniform float IrisScale <
+    string UIName = "Iris Scale"; string UIWidget = "Slider";
+    float UIMin = 0.05; float UIMax = 2.0; float UIStep = 0.01;
+    string UIGroup = "2 - Iris"; int UIOrder = 201;
+> = 0.6;
+
+uniform vec3 IrisColor <
+    string UIName = "Iris Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "2 - Iris"; int UIOrder = 202;
+> = {0.25, 0.55, 0.85};
+
+uniform texture2D IrisMap <
+    string ResourceName = ""; string ResourceType = "2D";
+    string UIName = "Iris Map"; string UIWidget = "FilePicker";
+    string UIGroup = "2 - Iris"; int UIOrder = 203;
+>;
+uniform sampler2D IrisSampler = sampler_state {
+    Texture = <IrisMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform bool UseIrisMap <
+    string UIName = "Use Iris Map";
+    string UIGroup = "2 - Iris"; int UIOrder = 204;
+> = false;
+
+// Vertical gradient across the iris -- the classic anime "lit from below" eye.
+uniform texture2D IrisRampMap <
+    string ResourceName = ""; string ResourceType = "2D";
+    string UIName = "Iris Ramp"; string UIWidget = "FilePicker";
+    string UIGroup = "2 - Iris"; int UIOrder = 205;
+>;
+uniform sampler2D IrisRampSampler = sampler_state {
+    Texture = <IrisRampMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_EDGE;  TEXTURE_WRAP_T = CLAMP_TO_EDGE;
+};
+
+uniform bool UseIrisRamp <
+    string UIName = "Use Iris Ramp";
+    string UIGroup = "2 - Iris"; int UIOrder = 206;
+> = false;
+
+uniform float IrisRampMix <
+    string UIName = "Iris Ramp Mix"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "2 - Iris"; int UIOrder = 207;
+> = 1.0;
+
+uniform float IrisEdgeSoftness <
+    string UIName = "Iris Edge Softness"; string UIWidget = "Slider";
+    float UIMin = 0.001; float UIMax = 0.3; float UIStep = 0.002;
+    string UIGroup = "2 - Iris"; int UIOrder = 208;
+> = 0.02;
+
+
+//-----------------------------------------------------------------------------
+//  3 - Pupil & limbal ring
+//-----------------------------------------------------------------------------
+uniform float PupilScale <
+    string UIName = "Pupil Scale"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "3 - Pupil"; int UIOrder = 300;
+> = 0.35;
+
+uniform vec3 PupilColor <
+    string UIName = "Pupil Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "3 - Pupil"; int UIOrder = 301;
+> = {0.04, 0.03, 0.06};
+
+uniform float PupilSoftness <
+    string UIName = "Pupil Softness"; string UIWidget = "Slider";
+    float UIMin = 0.001; float UIMax = 0.5; float UIStep = 0.002;
+    string UIGroup = "3 - Pupil"; int UIOrder = 302;
+> = 0.05;
+
+uniform vec3 LimbalColor <
+    string UIName = "Limbal Ring Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "3 - Pupil"; int UIOrder = 303;
+> = {0.05, 0.06, 0.12};
+
+uniform float LimbalWidth <
+    string UIName = "Limbal Ring Width"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 0.5; float UIStep = 0.01;
+    string UIGroup = "3 - Pupil"; int UIOrder = 304;
+> = 0.12;
+
+
+//-----------------------------------------------------------------------------
+//  4 - Parallax  (the iris sits behind the cornea)
+//-----------------------------------------------------------------------------
+uniform float ParallaxDepth <
+    string UIName = "Parallax Depth"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 0.5; float UIStep = 0.005;
+    string UIGroup = "4 - Parallax"; int UIOrder = 400;
+> = 0.06;
+
+uniform float ParallaxClamp <
+    string UIName = "Parallax Clamp"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "4 - Parallax"; int UIOrder = 401;
+> = 0.35;
+
+// Bulges the iris outward instead of sinking it -- some styles prefer convex.
+uniform float ParallaxSign <
+    string UIName = "Parallax Sign  -1 concave / +1 convex";
+    string UIWidget = "Slider";
+    float UIMin = -1.0; float UIMax = 1.0; float UIStep = 2.0;
+    string UIGroup = "4 - Parallax"; int UIOrder = 402;
+> = -1.0;
+
+
+//-----------------------------------------------------------------------------
+//  5 - Highlight  (the big catchlight)
+//-----------------------------------------------------------------------------
+uniform texture2D HighlightMap <
+    string ResourceName = ""; string ResourceType = "2D";
+    string UIName = "Highlight Map"; string UIWidget = "FilePicker";
+    string UIGroup = "5 - Highlight"; int UIOrder = 500;
+>;
+uniform sampler2D HighlightSampler = sampler_state {
+    Texture = <HighlightMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = CLAMP_TO_BORDER;  TEXTURE_WRAP_T = CLAMP_TO_BORDER;
+};
+
+uniform bool UseHighlightMap <
+    string UIName = "Use Highlight Map";
+    string UIGroup = "5 - Highlight"; int UIOrder = 501;
+> = false;
+
+uniform vec3 HighlightColor <
+    string UIName = "Highlight Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "5 - Highlight"; int UIOrder = 502;
+> = {1.0, 1.0, 1.0};
+
+uniform float HighlightIntensity <
+    string UIName = "Highlight Intensity"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.05;
+    string UIGroup = "5 - Highlight"; int UIOrder = 503;
+> = 1.0;
+
+uniform vec2 HighlightCenter <
+    string UIName = "Highlight Center (UV)";
+    string UIGroup = "5 - Highlight"; int UIOrder = 504;
+> = {0.38, 0.62};
+
+uniform float HighlightScale <
+    string UIName = "Highlight Scale"; string UIWidget = "Slider";
+    float UIMin = 0.01; float UIMax = 1.0; float UIStep = 0.005;
+    string UIGroup = "5 - Highlight"; int UIOrder = 505;
+> = 0.22;
+
+uniform float HighlightRotate <
+    string UIName = "Highlight Rotate (deg)"; string UIWidget = "Slider";
+    float UIMin = -180.0; float UIMax = 180.0; float UIStep = 1.0;
+    string UIGroup = "5 - Highlight"; int UIOrder = 506;
+> = 0.0;
+
+// 0 = pinned to the mesh, 1 = slides with the viewer like a real reflection.
+uniform float HighlightFollowView <
+    string UIName = "Highlight Follows View"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "5 - Highlight"; int UIOrder = 507;
+> = 0.5;
+
+// Procedural fallback when no highlight texture is plugged in.
+uniform float HighlightSoftness <
+    string UIName = "Highlight Softness"; string UIWidget = "Slider";
+    float UIMin = 0.001; float UIMax = 1.0; float UIStep = 0.005;
+    string UIGroup = "5 - Highlight"; int UIOrder = 508;
+> = 0.25;
+
+
+//-----------------------------------------------------------------------------
+//  6 - Secondary catchlight
+//-----------------------------------------------------------------------------
+uniform bool UseCatchlight <
+    string UIName = "Enable Catchlight";
+    string UIGroup = "6 - Catchlight"; int UIOrder = 600;
+> = true;
+
+uniform vec3 CatchlightColor <
+    string UIName = "Catchlight Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "6 - Catchlight"; int UIOrder = 601;
+> = {0.85, 0.9, 1.0};
+
+uniform float CatchlightIntensity <
+    string UIName = "Catchlight Intensity"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.05;
+    string UIGroup = "6 - Catchlight"; int UIOrder = 602;
+> = 0.6;
+
+uniform vec2 CatchlightCenter <
+    string UIName = "Catchlight Center (UV)";
+    string UIGroup = "6 - Catchlight"; int UIOrder = 603;
+> = {0.62, 0.38};
+
+uniform float CatchlightScale <
+    string UIName = "Catchlight Scale"; string UIWidget = "Slider";
+    float UIMin = 0.01; float UIMax = 0.6; float UIStep = 0.005;
+    string UIGroup = "6 - Catchlight"; int UIOrder = 604;
+> = 0.09;
+
+
+//-----------------------------------------------------------------------------
+//  7 - Shading
+//-----------------------------------------------------------------------------
+uniform bool Unlit <
+    string UIName = "Unlit (ignore scene lights)";
+    string UIGroup = "7 - Shading"; int UIOrder = 700;
+> = false;
+
+uniform vec3 AmbientColor <
+    string UIName = "Ambient Color"; string UIWidget = "ColorPicker";
+    string UIGroup = "7 - Shading"; int UIOrder = 701;
+> = {0.25, 0.25, 0.3};
+
+uniform float LightWrap <
+    string UIName = "Light Wrap"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup = "7 - Shading"; int UIOrder = 702;
+> = 0.8;
+
+uniform float EmissionIntensity <
+    string UIName = "Iris Emission"; string UIWidget = "Slider";
+    float UIMin = 0.0; float UIMax = 5.0; float UIStep = 0.05;
+    string UIGroup = "7 - Shading"; int UIOrder = 703;
+> = 0.0;
+
+uniform bool AlbedoIsSRGB <
+    string UIName = "Textures Are sRGB";
+    string UIGroup = "7 - Shading"; int UIOrder = 704;
+> = true;
+
+
+//-----------------------------------------------------------------------------
+//  Streams
+//-----------------------------------------------------------------------------
+attribute APPDATA
+{
+    vec3 inPosition : POSITION;
+    vec3 inNormal   : NORMAL;
+    vec3 inTangent  : TANGENT;
+    vec3 inBinormal : BINORMAL;
+    vec2 inUV0      : TEXCOORD0;
+};
+
+attribute SHADERDATA
+{
+    vec3 wPos;
+    vec3 wNormal;
+    vec3 wTangent;
+    vec3 wBinormal;
+    vec2 uv0;
+};
+
+attribute PIXELDATA      { vec4 outColor : COLOR0; };
+attribute PIXELDATA_SHDW { vec4 outColor : COLOR0; };
+
+
+//=============================================================================
+GLSLShader Common
+{
+    vec2 flipUV(vec2 uv) { return vec2(uv.x, 1.0 - uv.y); }
+    float sat(float x)   { return clamp(x, 0.0, 1.0); }
+    vec3 toLinear(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
+
+    vec2 rotateUV(vec2 uv, float degrees)
+    {
+        float a = radians(degrees);
+        float s = sin(a), c = cos(a);
+        return vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c);
+    }
+
+    // A soft round blob, used when no highlight texture is supplied.
+    float blob(vec2 p, float softness)
+    {
+        return 1.0 - smoothstep(1.0 - sat(softness), 1.0, length(p));
+    }
+}
+
+
+//=============================================================================
+GLSLShader VS_Main
+{
+    void main()
+    {
+        vec4 wp = gWorldXf * vec4(inPosition, 1.0);
+
+        VS_OUT.wPos      = wp.xyz;
+        VS_OUT.wNormal   = normalize((gWorldIT * vec4(inNormal,   0.0)).xyz);
+        VS_OUT.wTangent  = normalize((gWorldXf * vec4(inTangent,  0.0)).xyz);
+        VS_OUT.wBinormal = normalize((gWorldXf * vec4(inBinormal, 0.0)).xyz);
+        VS_OUT.uv0       = inUV0;
+
+        gl_Position = gWVPXf * vec4(inPosition, 1.0);
+    }
+}
+
+
+//=============================================================================
+GLSLShader PS_Main
+{
+    void main()
+    {
+        vec2 uv = PS_IN.uv0;
+
+        vec3 N = normalize(PS_IN.wNormal);
+        vec3 T = normalize(PS_IN.wTangent);
+        vec3 B = normalize(PS_IN.wBinormal);
+        vec3 V = normalize(gViewIXf[3].xyz - PS_IN.wPos);
+
+        // View direction in tangent space drives both the parallax and the
+        // way the highlight slides across the cornea.
+        vec3 vTS = vec3(dot(V, T), dot(V, B), dot(V, N));
+        vTS.z = (abs(vTS.z) < 1e-3) ? 1e-3 : vTS.z;
+        vec2 viewOffset = clamp(vTS.xy / vTS.z, vec2(-ParallaxClamp), vec2(ParallaxClamp));
+
+        //---- iris, shifted so it reads as sitting behind the cornea --------
+        vec2 irisUV = (uv - IrisCenter) / max(IrisScale, 1e-4);
+        irisUV += viewOffset * ParallaxDepth * sign(ParallaxSign) / max(IrisScale, 1e-4);
+
+        float r = length(irisUV) * 2.0;      // 0 at centre, 1 at the iris rim
+
+        vec3 iris = IrisColor;
+        if (UseIrisMap) {
+            vec4 tex = texture(IrisSampler, flipUV(irisUV + 0.5));
+            if (AlbedoIsSRGB) tex.rgb = toLinear(tex.rgb);
+            iris *= tex.rgb;
+        }
+        if (UseIrisRamp) {
+            vec3 ramp = texture(IrisRampSampler, flipUV(vec2(sat(r), 0.5))).rgb;
+            if (AlbedoIsSRGB) ramp = toLinear(ramp);
+            iris = mix(iris, iris * ramp, IrisRampMix);
+        }
+
+        // pupil
+        float pupil = smoothstep(PupilScale - PupilSoftness,
+                                 PupilScale + PupilSoftness, r);
+        iris = mix(PupilColor, iris, pupil);
+
+        // limbal ring darkens the outer edge of the iris
+        float limbal = smoothstep(1.0 - LimbalWidth, 1.0, r);
+        iris = mix(iris, LimbalColor, limbal);
+
+        //---- sclera -------------------------------------------------------
+        vec3 sclera = ScleraColor;
+        if (UseScleraMap) {
+            vec4 tex = texture(ScleraSampler, flipUV(uv));
+            if (AlbedoIsSRGB) tex.rgb = toLinear(tex.rgb);
+            sclera *= tex.rgb;
+        }
+
+        float irisMask = 1.0 - smoothstep(1.0 - IrisEdgeSoftness,
+                                          1.0 + IrisEdgeSoftness, r);
+        vec3 albedo = mix(sclera, iris, irisMask);
+
+        //---- eyelid contact shadow ----------------------------------------
+        float lid = smoothstep(LidShadowHeight, 1.0, uv.y);
+        albedo = mix(albedo, albedo * LidShadowColor, lid * LidShadowAmount);
+
+        //---- shading ------------------------------------------------------
+        vec3 lit;
+        if (Unlit) {
+            lit = albedo;
+        } else {
+            vec3 L = (Light0Type == 4)
+                   ? normalize(-Light0Dir)
+                   : normalize(Light0Pos - PS_IN.wPos);
+            float ndl = dot(N, L);
+            float wrapped = mix(sat(ndl), ndl * 0.5 + 0.5, LightWrap);
+            lit = albedo * (Light0Color * Light0Intensity * wrapped + AmbientColor);
+        }
+
+        lit += albedo * irisMask * EmissionIntensity;
+
+        //---- highlight ----------------------------------------------------
+        vec2 hlUV = (uv - HighlightCenter) / max(HighlightScale, 1e-4);
+        hlUV -= viewOffset * HighlightFollowView / max(HighlightScale, 1e-4);
+        hlUV = rotateUV(hlUV, HighlightRotate);
+
+        float highlight;
+        if (UseHighlightMap) {
+            vec2 sampleUV = hlUV * 0.5 + 0.5;
+            highlight = texture(HighlightSampler, flipUV(sampleUV)).r;
+            // CLAMP_TO_BORDER keeps it from tiling, but be explicit.
+            if (sampleUV.x < 0.0 || sampleUV.x > 1.0 ||
+                sampleUV.y < 0.0 || sampleUV.y > 1.0) highlight = 0.0;
+        } else {
+            highlight = blob(hlUV, HighlightSoftness);
+        }
+        lit += HighlightColor * highlight * HighlightIntensity;
+
+        if (UseCatchlight) {
+            vec2 cl = (uv - CatchlightCenter) / max(CatchlightScale, 1e-4);
+            cl -= viewOffset * HighlightFollowView * 0.5 / max(CatchlightScale, 1e-4);
+            lit += CatchlightColor * blob(cl, HighlightSoftness) * CatchlightIntensity;
+        }
+
+        outColor = vec4(lit, 1.0);
+    }
+}
+
+
+//=============================================================================
+GLSLShader PS_Shadow
+{
+    void main()
+    {
+        vec4  sp = gShadowVP * vec4(PS_IN.wPos, 1.0);
+        float d  = sp.z / sp.w;
+        outColor = vec4(0.5 * (d + fwidth(d)) + 0.5);
+    }
+}
+
+
+//=============================================================================
+technique AnimeEye
+<
+    string variableNameAsAttributeName = "true";
+>
+{
+    pass pShade < string drawContext = "colorPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA) = { Common, PS_Main };
+    }
+    pass pShadow < string drawContext = "shadowPass"; >
+    {
+        VertexShader (in APPDATA, out SHADERDATA VS_OUT) = { Common, VS_Main };
+        PixelShader  (in SHADERDATA PS_IN, out PIXELDATA_SHDW) = { Common, PS_Shadow };
+    }
+}

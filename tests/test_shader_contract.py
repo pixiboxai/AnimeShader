@@ -1,4 +1,4 @@
-"""Keep the .ogsfx, the presets and the UI talking about the same names.
+"""Keep the .ogsfx files, the presets and the UI talking about the same names.
 
 Pure Python -- no Maya, no GPU::
 
@@ -18,10 +18,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
-SHADER = os.path.join(ROOT, "shaders", "GNTAnime.ogsfx")
+SHADER_DIR = os.path.join(ROOT, "shaders")
 PRESET_DIR = os.path.join(ROOT, "presets")
 MAIN_WINDOW = os.path.join(ROOT, "scripts", "gntshader", "ui", "main_window.py")
 ENV_MODULE = os.path.join(ROOT, "scripts", "gntshader", "core", "env.py")
+
+MAIN_SHADER = "GNTAnime.ogsfx"
+EYE_SHADER = "GNTAnimeEye.ogsfx"
 
 FAILURES = []
 
@@ -38,46 +41,45 @@ def read(path):
         return handle.read()
 
 
-def shader_uniforms(source):
-    """Uniform names the effect exposes as Maya attributes."""
-    names = set()
-    for match in re.finditer(
-            r"^\s*uniform\s+\w+\s+(\w+)", source, re.MULTILINE):
-        names.add(match.group(1))
-    return names
+def parse_shader(source):
+    """Uniform names, technique names and vertex semantics of an effect."""
+    uniforms = set(re.findall(r"^\s*uniform\s+\w+\s+(\w+)", source, re.MULTILINE))
+    techniques = set(re.findall(r"^technique\s+(\w+)", source, re.MULTILINE))
 
-
-def shader_techniques(source):
-    return set(re.findall(r"^technique\s+(\w+)", source, re.MULTILINE))
-
-
-def vertex_attributes(source):
-    """Semantics declared in the APPDATA block."""
+    semantics = set()
     block = re.search(r"attribute\s+APPDATA\s*\{(.*?)\}", source, re.DOTALL)
-    if not block:
-        return set()
-    return set(re.findall(r":\s*(\w+)\s*;", block.group(1)))
+    if block:
+        semantics = set(re.findall(r":\s*(\w+)\s*;", block.group(1)))
+
+    return uniforms, techniques, semantics
 
 
 def main():
-    source = read(SHADER)
+    shaders = {}
+    for name in sorted(os.listdir(SHADER_DIR)):
+        if name.endswith(".ogsfx"):
+            shaders[name] = parse_shader(read(os.path.join(SHADER_DIR, name)))
 
-    uniforms = shader_uniforms(source)
-    techniques = shader_techniques(source)
-    semantics = vertex_attributes(source)
+    print("shaders")
+    check(MAIN_SHADER in shaders, "%s present" % MAIN_SHADER)
+    check(EYE_SHADER in shaders, "%s present" % EYE_SHADER)
 
-    print("shader")
-    check(len(uniforms) > 50, "uniforms parsed", "%d found" % len(uniforms))
-    check(techniques == {"Anime", "AnimeOutline"}, "techniques",
-          ", ".join(sorted(techniques)))
+    for name, (uniforms, techniques, semantics) in shaders.items():
+        check(len(uniforms) > 20, "%s: uniforms parsed" % name,
+              "%d found" % len(uniforms))
+        check(bool(techniques), "%s: techniques declared" % name,
+              ", ".join(sorted(techniques)))
+        # Maya's glslShader binds exactly one colour stream; a second COLOR
+        # semantic compiles but the varying is dropped in silence.
+        check("COLOR1" not in semantics, "%s: no COLOR1" % name,
+              ", ".join(sorted(semantics)))
 
-    # Regression guard. Maya's glslShader binds exactly one colour stream;
-    # a second COLOR semantic compiles but the varying is dropped in silence.
-    print("vertex streams")
-    check("COLOR1" not in semantics,
-          "no COLOR1 (glslShader would drop it silently)", ", ".join(sorted(semantics)))
-    check("COLOR0" in semantics, "COLOR0 present for artist paint")
-    check("TEXCOORD1" in semantics, "TEXCOORD1 present for the smooth normal")
+    main_uniforms, main_techniques, main_semantics = shaders[MAIN_SHADER]
+    print("main shader streams")
+    check("COLOR0" in main_semantics, "COLOR0 present for artist paint")
+    check("TEXCOORD1" in main_semantics, "TEXCOORD1 present for the smooth normal")
+    check(main_techniques == {"Anime", "AnimeOutline"}, "technique names",
+          ", ".join(sorted(main_techniques)))
 
     print("presets")
     preset_files = sorted(name for name in os.listdir(PRESET_DIR)
@@ -86,40 +88,50 @@ def main():
 
     for name in preset_files:
         data = json.loads(read(os.path.join(PRESET_DIR, name)))
+        target = data.get("shader", MAIN_SHADER)
+
+        if target not in shaders:
+            check(False, "%s: names a shader that exists" % name, target)
+            continue
+
+        uniforms, techniques, _semantics = shaders[target]
 
         unknown = sorted(set(data.get("parameters", {})) - uniforms)
-        check(not unknown, "%s: every key is a real uniform" % name,
+        check(not unknown, "%s -> %s: every key is a real uniform" % (name, target),
               ("unknown: " + ", ".join(unknown)) if unknown else "")
 
         technique = data.get("technique")
-        check(technique in techniques, "%s: technique exists" % name,
-              str(technique))
+        check(technique in techniques, "%s: technique exists" % name, str(technique))
 
     print("tool window")
     ui = read(MAIN_WINDOW)
     quick = re.search(r"QUICK_PARAMS\s*=\s*\[(.*?)\]", ui, re.DOTALL)
     if quick:
         attrs = re.findall(r'\(\s*"(\w+)"', quick.group(1))
-        unknown = sorted(set(attrs) - uniforms)
+        unknown = sorted(set(attrs) - main_uniforms)
         check(not unknown, "quick sliders map to real uniforms",
               ("unknown: " + ", ".join(unknown)) if unknown
               else "%d sliders" % len(attrs))
     else:
         check(False, "QUICK_PARAMS found in main_window.py")
 
-    # Uniforms the Python side pokes by name must exist too.
     print("code references")
     env_src = read(ENV_MODULE)
     check("SMOOTH_NORMAL_UV_SET" in env_src and
           "SMOOTH_NORMAL_COLOR_SET" not in env_src,
           "env.py uses the UV-set name, not the old colour-set one")
 
+    every_uniform = set()
+    for uniforms, _t, _s in shaders.values():
+        every_uniform |= uniforms
+
     for path in (os.path.join(ROOT, "verify_outline.py"),
                  os.path.join(ROOT, "scripts", "gntshader", "core", "shader.py")):
         src = read(path)
         referenced = set(re.findall(r'"(Outline\w+|Head\w+|Base\w+|Rim\w+|Spec\w+'
-                                    r'|Shadow\w+|Ambient\w+|Emission\w+)"', src))
-        unknown = sorted(referenced - uniforms)
+                                    r'|Shadow\w+|Ambient\w+|Emission\w+|Iris\w+'
+                                    r'|Pupil\w+|Highlight\w+)"', src))
+        unknown = sorted(referenced - every_uniform)
         check(not unknown, "%s: uniform names valid" % os.path.basename(path),
               ("unknown: " + ", ".join(unknown)) if unknown
               else "%d referenced" % len(referenced))

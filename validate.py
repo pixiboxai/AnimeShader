@@ -183,10 +183,6 @@ def validate(shader_file=SHADER, keep=True):
     if ok:
         print("PASS  effect compiled -- %d techniques, %d uniforms"
               % (len(techniques), len(uniforms)))
-        print()
-        print("Next: look through the persp viewport. You should see a shaded")
-        print("sphere. Switch technique to 'AnimeOutline' to check the outline")
-        print("pass actually draws -- that is the one unverified assumption.")
     else:
         print("FAIL  effect did not compile. Read the diagnostics above.")
         if not techniques and not diagnostics.strip():
@@ -221,10 +217,35 @@ def check_multipass_outline(node=None):
     print("mesh outline described in docs/00_research_anime_shader.md section 6.")
 
 
+def validate_all():
+    """Compile every effect in shaders/ and report a combined verdict."""
+    shader_dir = ROOT + "/shaders"
+    files = sorted(name for name in os.listdir(shader_dir)
+                   if name.endswith(".ogsfx"))
+
+    results = {}
+    for name in files:
+        results[name] = validate(os.path.join(shader_dir, name), keep=False)
+        print("")
+
+    print("=" * 68)
+    for name in files:
+        print("  %-24s %s" % (name, "PASS" if results[name] else "FAIL"))
+    print("=" * 68)
+
+    if all(results.values()):
+        print("All %d effect(s) compiled." % len(files))
+        print("")
+        print("To check the outline pass actually draws, run verify_outline.py.")
+    else:
+        print("Some effects failed -- read the diagnostics above.")
+    return results
+
+
 try:
-    validate()
+    validate_all()
 except Exception:
-    print("!! validate() raised:")
+    print("!! validation raised:")
     print(traceback.format_exc())
 finally:
     _flush()
