@@ -692,6 +692,34 @@ uniform float RimUpMask <
     int    UIOrder  = 803;
 > = 1.0;
 
+// Where the band sits on the fresnel curve, i.e. how wide the rim reads.
+// A gradient falloff looks like a lit sphere; anime rim is a crisp strip.
+uniform float RimThreshold <
+    string UIName   = "Rim Threshold";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 805;
+> = 0.35;
+
+uniform float RimSoftness <
+    string UIName   = "Rim Softness";
+    string UIWidget = "Slider";
+    float  UIMin = 0.001; float UIMax = 0.5; float UIStep = 0.005;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 806;
+> = 0.08;
+
+// Rim light is light, not paint. Tie it to the albedo and it disappears on
+// dark materials, which is the opposite of what a backlight does.
+uniform float RimAlbedoTint <
+    string UIName   = "Rim Takes Albedo Color";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "8 - Rim";
+    int    UIOrder  = 807;
+> = 0.25;
+
 uniform float RimFollowLight <
     string UIName   = "Rim Follows Light";
     string UIWidget = "Slider";
@@ -1343,10 +1371,27 @@ GLSLShader PS_Main
         specular *= keyRadiance;
 
         //---- rim ----------------------------------------------------------
-        float fres   = pow(1.0 - sat(dot(N, V)), RimPower);
+        float fres = pow(1.0 - sat(dot(N, V)), RimPower);
+
+        // Crisp strip rather than a falloff.
+        float rimBand = smoothstep(RimThreshold - RimSoftness,
+                                   RimThreshold + RimSoftness, fres);
+
         float upMask = mix(1.0, sat(dot(N, vec3(0.0, 1.0, 0.0))), RimUpMask);
-        float litAmt = mix(1.0, sat(ndl * 0.5 + 0.5), RimFollowLight);
-        vec3  rim    = RimColor * fres * upMask * litAmt * RimIntensity;
+
+        // Which SIDE of the silhouette the light is on cannot be answered by
+        // dot(N, L): along the rim N is perpendicular to V, so that dot sits
+        // near zero on both sides and the rim wraps the whole outline. Project
+        // both vectors onto the screen plane first and the two sides separate
+        // cleanly.
+        vec3  Nv = N - V * dot(N, V);
+        vec3  Lv = L - V * dot(L, V);
+        float side = (length(Nv) > 1e-4 && length(Lv) > 1e-4)
+                   ? sat(dot(normalize(Nv), normalize(Lv)))
+                   : 1.0;
+        float sideMask = mix(1.0, side, RimFollowLight);
+
+        vec3 rim = RimColor * rimBand * upMask * sideMask * RimIntensity;
 
         //---- GBFR face rim (camera driven) --------------------------------
         vec3 faceRim = vec3(0.0);
@@ -1417,7 +1462,7 @@ GLSLShader PS_Main
         //---- combine ------------------------------------------------------
         vec3 color = diffuse
                    + specular
-                   + rim * albedo
+                   + rim * mix(vec3(1.0), albedo, RimAlbedoTint)
                    + faceRim
                    + fill
                    + matcap * albedo
