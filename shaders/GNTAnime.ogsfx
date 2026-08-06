@@ -112,8 +112,22 @@ uniform float NormalStrength <
     int    UIOrder  = 152;
 > = 1.0;
 
+// Tangent-space maps follow the surface and survive deformation, which is why
+// they are the default for skinned characters. Object and world space maps
+// hold an absolute direction: cheaper (no tangent frame) and immune to bad
+// UV seams, but they are baked against one pose -- rotate the object and a
+// world-space map lights wrongly; skin it and both break.
+uniform float NormalMapSpace <
+    string UIName   = "Normal Space  0=Tangent 1=Object 2=World";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 1.0;
+    string UIGroup  = "1b - Normal";
+    int    UIOrder  = 152;
+> = 0.0;
+
 // Maya, Substance and most DCC bakes are OpenGL (+Y up). Unreal and a lot of
 // game bakes are DirectX (-Y). Getting this wrong inverts every dent.
+// Only meaningful for tangent-space maps.
 uniform bool NormalFlipGreen <
     string UIName  = "Flip Green (DirectX map)";
     string UIGroup = "1b - Normal";
@@ -1051,18 +1065,36 @@ GLSLShader PS_Main
         vec3 Nband = Ngeom;
 
         if (UseNormalMap) {
-            vec3 ts = texture(NormalSampler, flipUV(uv)).xyz * 2.0 - 1.0;
-            if (NormalFlipGreen) ts.y = -ts.y;
-            ts.xy *= NormalStrength;
-            ts = normalize(ts);
+            vec3 raw = texture(NormalSampler, flipUV(uv)).xyz * 2.0 - 1.0;
+            if (NormalFlipGreen) raw.y = -raw.y;
 
-            // Same Gram-Schmidt the outline bake uses, so both agree on the
-            // tangent frame even when Maya's tangent is not perpendicular.
-            vec3 T = normalize(PS_IN.wTangent - Ngeom * dot(Ngeom, PS_IN.wTangent));
-            vec3 B = cross(Ngeom, T);
-            if (dot(B, PS_IN.wBinormal) < 0.0) B = -B;
+            int nspace = int(NormalMapSpace + 0.5);
 
-            N = normalize(mat3(T, B, Ngeom) * ts);
+            if (nspace == 0) {
+                // Tangent space: scale the sideways components, then rotate
+                // into world through the same Gram-Schmidt frame the outline
+                // bake uses, so both agree even when Maya's tangent is not
+                // perpendicular to the normal.
+                raw.xy *= NormalStrength;
+                raw = normalize(raw);
+
+                vec3 T = normalize(PS_IN.wTangent - Ngeom * dot(Ngeom, PS_IN.wTangent));
+                vec3 B = cross(Ngeom, T);
+                if (dot(B, PS_IN.wBinormal) < 0.0) B = -B;
+
+                N = normalize(mat3(T, B, Ngeom) * raw);
+            } else {
+                // Object and world space maps already hold a full direction,
+                // so there is nothing to rotate into place and no tangent
+                // frame involved -- strength becomes a blend against the
+                // geometric normal instead of a sideways scale.
+                vec3 wn = normalize(raw);
+                if (nspace == 1) {
+                    wn = normalize((gWorldIT * vec4(wn, 0.0)).xyz);
+                }
+                N = normalize(mix(Ngeom, wn, clamp(NormalStrength, 0.0, 1.0)));
+            }
+
             Nband = normalize(mix(Ngeom, N, NormalDiffuseAmount));
         }
 

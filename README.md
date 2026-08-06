@@ -152,8 +152,40 @@ dùng cho ngưỡng cel — bị kéo về normal hình học theo núm **`Affec
 
 `Normal Strength` đo được +3% / +7% / +12% chi tiết ở mức 0.5 / 1.0 / 2.0.
 
+### Không gian normal map
+
+`Normal Space`: **0 = Tangent, 1 = Object, 2 = World**.
+
+Tangent space bám theo bề mặt nên sống sót qua biến dạng — đó là lý do nó là mặc định cho
+nhân vật có skinning. Object và world space lưu **hướng tuyệt đối**: rẻ hơn (không cần
+khung tangent) và miễn nhiễm với UV seam xấu, nhưng chúng được bake theo **một tư thế duy
+nhất**.
+
+Đo bằng map phẳng `(0,0,1)` trên quả cầu, đèn chiếu vào mặt trước:
+
+| Chế độ | stddev | Ghi chú |
+|---|---|---|
+| Tắt | 39.77 | |
+| Tangent | 39.75 | **bằng đúng lúc tắt** — map phẳng là no-op, đúng như phải thế |
+| Object | 0.00 | cả vật nhận một normal hằng số |
+| World | 0.00 | như trên |
+
+Xoay quả cầu 90° quanh Y:
+
+| Chế độ | % sáng | |
+|---|---|---|
+| Object | 0.0% | normal **xoay theo vật**, quay khỏi đèn nên vào bóng |
+| World | 100% | **không đổi**, phớt lờ phép xoay |
+
+Đó chính là ranh giới cần nhớ: object space đi theo vật, world space thì không. Cả hai
+đều **hỏng khi mesh bị skinning** — nhân vật động thì dùng tangent space.
+
+Với object/world space, `Normal Strength` là hệ số **pha trộn** với normal hình học
+(0…1), không phải hệ số nhân thành phần ngang như ở tangent space.
+
 `Flip Green` cho normal map kiểu DirectX (Unreal, nhiều bake game). Maya và Substance
-xuất kiểu OpenGL nên để tắt. Sai cờ này thì mọi vết lõm thành vết lồi.
+xuất kiểu OpenGL nên để tắt. Sai cờ này thì mọi vết lõm thành vết lồi. Chỉ có tác dụng
+với tangent space.
 
 Normal map **phải nạp ở colour space `Raw`**, không phải sRGB:
 
