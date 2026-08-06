@@ -75,6 +75,59 @@ uniform bool AlbedoIsSRGB <
     int    UIOrder = 103;
 > = true;
 
+//-----------------------------------------------------------------------------
+//  1b - Normal map
+//
+//  Cel shading and normal maps fight each other: the diffuse band is a hard
+//  threshold, so perturbing the normal shatters the terminator into speckle.
+//  Genshin and GGXrd mostly keep the band on the geometric normal and let the
+//  map drive the highlight instead. NormalDiffuseAmount is that dial -- 0
+//  keeps the terminator clean, 1 lets the map cut into it.
+//-----------------------------------------------------------------------------
+uniform texture2D NormalMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Normal Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "1b - Normal";
+    int    UIOrder  = 150;
+>;
+uniform sampler2D NormalSampler = sampler_state {
+    Texture = <NormalMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseNormalMap <
+    string UIName  = "Use Normal Map";
+    string UIGroup = "1b - Normal";
+    int    UIOrder = 151;
+> = false;
+
+uniform float NormalStrength <
+    string UIName   = "Normal Strength";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 3.0; float UIStep = 0.01;
+    string UIGroup  = "1b - Normal";
+    int    UIOrder  = 152;
+> = 1.0;
+
+// Maya, Substance and most DCC bakes are OpenGL (+Y up). Unreal and a lot of
+// game bakes are DirectX (-Y). Getting this wrong inverts every dent.
+uniform bool NormalFlipGreen <
+    string UIName  = "Flip Green (DirectX map)";
+    string UIGroup = "1b - Normal";
+    int    UIOrder = 153;
+> = false;
+
+uniform float NormalDiffuseAmount <
+    string UIName   = "Affects Cel Band";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "1b - Normal";
+    int    UIOrder  = 154;
+> = 0.25;
+
 uniform bool UseAlphaClip <
     string UIName  = "Alpha Clip";
     string UIGroup = "1 - Base";
@@ -987,9 +1040,31 @@ GLSLShader PS_Main
                       : RampRowIndex;
 
         //---- basis --------------------------------------------------------
-        vec3 N      = normalize(PS_IN.wNormal);
+        vec3 Ngeom  = normalize(PS_IN.wNormal);
         vec3 camPos = gViewIXf[3].xyz;
         vec3 V      = normalize(camPos - PS_IN.wPos);
+
+        // N carries the normal-map detail and drives specular, rim and matcap.
+        // Nband is the one the cel threshold uses, held back towards the
+        // geometric normal so the terminator does not break into speckle.
+        vec3 N     = Ngeom;
+        vec3 Nband = Ngeom;
+
+        if (UseNormalMap) {
+            vec3 ts = texture(NormalSampler, flipUV(uv)).xyz * 2.0 - 1.0;
+            if (NormalFlipGreen) ts.y = -ts.y;
+            ts.xy *= NormalStrength;
+            ts = normalize(ts);
+
+            // Same Gram-Schmidt the outline bake uses, so both agree on the
+            // tangent frame even when Maya's tangent is not perpendicular.
+            vec3 T = normalize(PS_IN.wTangent - Ngeom * dot(Ngeom, PS_IN.wTangent));
+            vec3 B = cross(Ngeom, T);
+            if (dot(B, PS_IN.wBinormal) < 0.0) B = -B;
+
+            N = normalize(mat3(T, B, Ngeom) * ts);
+            Nband = normalize(mix(Ngeom, N, NormalDiffuseAmount));
+        }
 
         //---- key light ----------------------------------------------------
         int   kType  = Light0Type;
@@ -1017,8 +1092,9 @@ GLSLShader PS_Main
             if (kInt <= 0.0) keyRadiance = vec3(1.0);
         }
 
-        float ndl = dot(N, L);
-        vec3  H   = normalize(L + V);
+        float ndl     = dot(N, L);         // detailed -- specular, rim
+        float ndlBand = dot(Nband, L);     // held back -- the cel threshold
+        vec3  H       = normalize(L + V);
 
         //---- shadow tint --------------------------------------------------
         // GGXrd: the shadow colour is painted per pixel, not picked globally.
@@ -1039,7 +1115,7 @@ GLSLShader PS_Main
         }
 
         //---- diffuse band -------------------------------------------------
-        vec3 band = celDiffuse(ndl, aoMask, rampRow, UseRampMap, RampSampler,
+        vec3 band = celDiffuse(ndlBand, aoMask, rampRow, UseRampMap, RampSampler,
                                shadowTint, threshold, ShadowSoftness, HalfLambert);
 
         //---- face SDF overrides the band on the face ----------------------

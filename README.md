@@ -134,6 +134,33 @@ shader.bind_streams(node, "body_geo")
 print(shader.stream_bindings(node))
 ```
 
+## Normal map
+
+Cel shading và normal map vốn xung khắc: dải bóng là một ngưỡng cứng, nên xáo trộn normal
+sẽ **xé vụn đường terminator thành lốm đốm**. Genshin và GGXrd phần lớn giữ dải bóng chạy
+theo normal hình học, chỉ để normal map điều khiển highlight.
+
+Nên shader tách làm hai: `N` (có chi tiết) dùng cho specular / rim / matcap, còn `Nband`
+dùng cho ngưỡng cel — bị kéo về normal hình học theo núm **`Affects Cel Band`**.
+
+| `Affects Cel Band` | stddev độ sáng | Nghĩa là |
+|---|---|---|
+| 0.00 | 24.00 | terminator sạch tuyệt đối, khối chỉ hiện ở specular |
+| 0.25 *(mặc định)* | 26.12 | có khối nhẹ ở dải bóng |
+| 0.50 | 31.79 | |
+| 1.00 | 45.77 | normal map cắt thẳng vào dải bóng, terminator vỡ |
+
+`Normal Strength` đo được +3% / +7% / +12% chi tiết ở mức 0.5 / 1.0 / 2.0.
+
+`Flip Green` cho normal map kiểu DirectX (Unreal, nhiều bake game). Maya và Substance
+xuất kiểu OpenGL nên để tắt. Sai cờ này thì mọi vết lõm thành vết lồi.
+
+Normal map **phải nạp ở colour space `Raw`**, không phải sRGB:
+
+```python
+shader.set_texture(node, "NormalMap", "D:/tex/normal.png", colour_space="Raw")
+```
+
 ## Texture
 
 Uniform texture **không phải string** — Maya sinh ra chúng dưới dạng `float3` connectable

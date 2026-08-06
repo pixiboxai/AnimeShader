@@ -3,8 +3,13 @@ __pycache__/
 validate_result.txt
 verify_outline_result.txt
 *_report.txt
-char_result.txt
-beauty_result.txt
+*_result.txt
+leftover.txt
+isolate.txt
+lightdbg.txt
+scene_state.txt
+uber_cmp.txt
 sweep_result.txt
+test_normal.png
 reference/
 docs/
