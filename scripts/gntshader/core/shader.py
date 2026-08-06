@@ -62,9 +62,17 @@ def create(name="GNTAnime", shader_file=None, technique=DEFAULT_TECHNIQUE):
 
 
 def set_shader_file(node, shader_file):
-    """Point a GLSLShader node at an .ogsfx file and recompile."""
-    # Maya wants forward slashes here.
-    cmds.setAttr(node + ".shader", shader_file.replace("\\", "/"), type="string")
+    """Point a GLSLShader node at an .ogsfx file and force a recompile.
+
+    Maya caches the compiled effect against the file path, so assigning an
+    edited .ogsfx -- even to a brand new node -- can hand you the previous
+    build with no warning. Clearing the attribute first drops the cache entry.
+    Skipping this once cost a whole measurement run: the shader under test was
+    the old one, and the numbers looked like a sign error in the maths.
+    """
+    path = shader_file.replace("\\", "/")
+    cmds.setAttr(node + ".shader", "", type="string")
+    cmds.setAttr(node + ".shader", path, type="string")
 
 
 def reload_shader(node):

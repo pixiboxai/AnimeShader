@@ -236,6 +236,23 @@ def verify():
     cmds.sets(cube, edit=True, forceElement=sg)
     cmds.refresh(force=True)
 
+    # Maya caches the compiled effect against the file path, so pointing a
+    # fresh node at an edited .ogsfx can still get you the previous build.
+    # That silently invalidated a whole sweep once. Clear and re-set to force
+    # a recompile, and say which build we are actually measuring.
+    cmds.setAttr(node + ".shader", "", type="string")
+    cmds.refresh(force=True)
+    cmds.setAttr(node + ".shader", SHADER, type="string")
+    cmds.refresh(force=True)
+    try:
+        import maya.mel as _mel
+        _mel.eval("GLSLShader %s -r" % node)
+        cmds.refresh(force=True)
+    except RuntimeError:
+        pass
+    log("shader mtime: %s"
+        % __import__("time").ctime(os.path.getmtime(SHADER)))
+
     techniques = cmds.getAttr(node + ".techniques") or []
     log("techniques  : %s" % ", ".join(techniques))
     if "AnimeOutline" not in techniques:
@@ -276,7 +293,7 @@ def verify():
 
     base_mask = [None]
 
-    def measure(tag, technique, smooth_normal=None):
+    def measure(tag, technique, smooth_normal=None, quiet=False):
         cmds.setAttr(node + ".technique", technique, type="string")
         if smooth_normal is not None:
             full = node + ".OutlineUseSmoothNormal"
@@ -286,12 +303,14 @@ def verify():
         path = _render("gntVerify_" + tag)
 
         total, red_out, red_in, covered, mask = classify(path, base_mask[0])
-        log("-" * 68)
-        log("%s" % tag)
-        log("  image      : %s" % path)
-        log("  red outside: %d   (the outline ring)" % red_out)
-        log("  red inside : %d   (cracks / z-fighting -- lower is better)" % red_in)
-        log("  covered px : %d / %d" % (covered, total))
+        if not quiet:
+            log("-" * 68)
+            log("%s" % tag)
+            log("  image      : %s" % path)
+            log("  red outside: %d   (the outline ring)" % red_out)
+            log("  red inside : %d   (cracks / z-fighting -- lower is better)"
+                % red_in)
+            log("  covered px : %d / %d" % (covered, total))
         return red_out, red_in, covered, mask
 
     # --- does the outline pass run at all? -------------------------------
@@ -347,6 +366,40 @@ def verify():
     log("  raw mesh normal  : %14d   %15d" % (raw_out, raw_in))
     log("  baked smooth norm: %14d   %15d" % (smooth_out, smooth_in))
 
+    # --- how much depth offset does it take to stop the leaking? ---------
+    # Same probe, same camera, same everything -- only OutlineZOffset moves.
+    # Running this in a separate harness produced numbers that disagreed with
+    # the ones above, so it lives here where the setup is shared.
+    log("")
+    log("=" * 68)
+    log("Depth-offset sweep (smooth normals on)")
+    log("")
+    log("  zOffset     ring(outside)   cracks(inside)")
+    log("  " + "-" * 44)
+
+    best = None
+    for z in (0.0, 1.0, 2.0, 5.0, 10.0, 40.0):
+        full = node + ".OutlineZOffset"
+        if not cmds.objExists(full):
+            log("  ! no OutlineZOffset uniform")
+            break
+        cmds.setAttr(full, z)
+        ring, cracks, _cov, _m = measure("zsweep_%d" % int(z),
+                                         "AnimeOutline", smooth_normal=1,
+                                         quiet=True)
+        log("  %-10.0f  %12d   %14d" % (z, ring, cracks))
+        # Want the cracks gone without eating into the ring.
+        if best is None or (cracks < best[2] and ring > best[1] * 0.8):
+            best = (z, ring, cracks)
+
+    if best:
+        log("")
+        log("  best: zOffset %.0f  ->  ring %d, cracks %d"
+            % (best[0], best[1], best[2]))
+    cmds.setAttr(node + ".OutlineZOffset", 2.0)
+
+    log("")
+    log("=" * 68)
     if raw_in == 0 and smooth_in == 0:
         log("INCONCLUSIVE  neither pass leaks red inside the silhouette, so")
         log("      this probe does not exercise the problem. Judge on a real")

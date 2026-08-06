@@ -613,13 +613,15 @@ uniform float OutlineDistanceFade <
     int    UIOrder  = 1105;
 > = 0.0;
 
+// Whole numbers, because 0.0002 is a value nobody can dial in by hand.
+// One unit = 0.0001 in clip space; 2 is what it takes to clear the probe.
 uniform float OutlineZOffset <
-    string UIName   = "Outline Z Offset";
+    string UIName   = "Outline Z Offset  (+ back, - front)";
     string UIWidget = "Slider";
-    float  UIMin = -0.01; float UIMax = 0.01; float UIStep = 0.0001;
+    float  UIMin = -20.0; float UIMax = 20.0; float UIStep = 1.0;
     string UIGroup  = "11 - Outline";
     int    UIOrder  = 1106;
-> = 0.0;
+> = 2.0;
 
 uniform bool OutlineTintFromAlbedo <
     string UIName  = "Tint Outline From Albedo";
@@ -1143,7 +1145,15 @@ GLSLShader VS_Outline
         wp.xyz += wN * width;
 
         vec4 cp = gVPXf * wp;
-        cp.z   -= OutlineZOffset * cp.w;
+        // Positive pushes the hull AWAY from the camera, so where it grazes
+        // the real surface the surface wins the depth test instead of leaking
+        // outline colour through. Negative pulls it forward, for an outline
+        // that always draws on top.
+        //
+        // Measured on a cube probe: 0 leaves 69 stray outline pixels inside
+        // the silhouette, 2 removes all of them and costs the ring nothing.
+        // Anything beyond that is wasted.
+        cp.z   += OutlineZOffset * 1e-4 * cp.w;
 
         VS_OUT.oPos = inPosition;
         VS_OUT.uv0  = inUV0;

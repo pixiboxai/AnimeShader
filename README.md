@@ -140,17 +140,32 @@ Shader đọc hai color set, **thứ tự tạo quyết định binding**:
 - **Outline pass chạy thật.** Maya *có* thực thi cả hai pass cùng khai báo
   `drawContext = "colorPass"`. Đo bằng cách đếm pixel: cùng một probe, đổi technique,
   pixel đỏ đi từ **0 → 1033**. Không cần fallback nhân đôi mesh.
-- **Smooth normal có tác dụng thật**, đo trên cube (mọi cạnh đều cứng):
+- **Viền sạch hoàn toàn**, đo trên cube (mọi cạnh đều cứng), với mặc định hiện tại:
 
   | | Viền (ngoài silhouette) | Nứt (trong silhouette) |
   |---|---|---|
   | Normal thường | 1003 px | **159 px** |
-  | Smooth normal | 964 px | **69 px** |
+  | Smooth normal | 964 px | **0 px** |
 
-  Giảm **56.6%** lượng đỏ rò qua khe nứt. Lưu ý cách đo: đẩy theo face normal làm 6 mặt
-  tách rời, và khe giữa chúng cũng lòi đỏ — nên **tổng** diện tích đỏ là chỉ số sai, nó
-  đếm vết nứt như thể là viền. Phải tách đỏ ngoài silhouette (viền thật) khỏi đỏ trong
-  silhouette (nứt).
+  Lưu ý cách đo: đẩy theo face normal làm 6 mặt tách rời, và khe giữa chúng cũng lòi đỏ —
+  nên **tổng** diện tích đỏ là chỉ số sai, nó đếm vết nứt như thể là viền. Phải tách đỏ
+  ngoài silhouette (viền thật) khỏi đỏ trong silhouette (nứt).
+
+- **`OutlineZOffset` mặc định 2**, tìm ra bằng cách quét:
+
+  | zOffset | Viền | Nứt |
+  |---|---|---|
+  | 0 | 964 | 69 |
+  | 1 | 964 | 8 |
+  | **2** | 964 | **0** |
+  | 5 · 10 · 40 | 964 | 0 |
+
+  Đơn vị là số nguyên (1 đơn vị = 0.0001 clip space) cho dễ chỉnh. Dương đẩy vỏ hull ra
+  xa, âm kéo ra trước (viền luôn nằm trên).
+
+  Hai biện pháp này **bổ sung nhau, không thay thế**: z-offset trị tranh chấp depth ở
+  cạnh gần song song hướng nhìn; smooth normal trị lỗ hổng hình học do mặt tách rời.
+  Normal thường vẫn còn 159 px nứt *dù đã có z-offset*, vì đó là lỗ thật.
 
 Chạy lại bất cứ lúc nào:
 
@@ -225,12 +240,17 @@ Kết quả ghi ra `verify_outline_result.txt`.
 - Mọi con số ở trên đo trên primitive. **Chưa chạy trên mesh nhân vật thật** — nơi UV
   unwrap tay, có skinning, và normal map cùng tác động.
 
-### Hai ràng buộc của Maya đã phải xử lý
+### Ba ràng buộc của Maya đã phải xử lý
 
 | Vấn đề | Cách xử lý |
 |---|---|
 | OGSFX không có render-state block, nên không viết được `Cull Front` | Đẩy hull ra rồi `if (gl_FrontFacing) discard;` trong pixel shader |
 | `glslShader` chỉ bind **một** colour stream — khai báo `COLOR1` compile được nhưng varying bị bỏ im lặng | Encode smooth normal octahedral thành 2 float, nhét vào UV set thứ hai (`TEXCOORD1`) |
+| **Maya cache effect đã compile theo đường dẫn file** — sửa `.ogsfx` rồi gán cho node mới vẫn có thể nhận bản build cũ, không cảnh báo gì | `set_shader_file()` xoá attribute rồi mới đặt lại, buộc compile lại |
+
+Cái thứ ba nguy hiểm nhất vì nó im lặng: nó từng làm hỏng nguyên một đợt đo — shader
+đang chạy là bản cũ, còn số liệu thì trông y như một lỗi dấu trong công thức. Nếu bạn sửa
+shader mà viewport không đổi gì, nghi chỗ này trước tiên.
 
 ---
 
