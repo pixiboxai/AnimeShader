@@ -455,6 +455,73 @@ uniform float SSSStrength <
 
 
 //-----------------------------------------------------------------------------
+//  4c - Ambient occlusion
+//
+//  Arc System Works hand-paint AO into the vertex colours "to correct the
+//  shadows". Two jobs hide behind that one word, and they want separate dials:
+//
+//    Band    - AO pushes a crevice past the cel threshold, so it falls into
+//              the shadow band even when the light says otherwise.
+//    Ambient - AO darkens the ambient and fill light. Without this the fill
+//              floods every crevice and the form goes flat, which is what a
+//              cel shader with no AO on its ambient always looks like.
+//
+//  Sources stack: ILM green, vertex colour green, and this map.
+//-----------------------------------------------------------------------------
+uniform texture2D AOMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "AO Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "4c - AO";
+    int    UIOrder  = 470;
+>;
+uniform sampler2D AOSampler = sampler_state {
+    Texture = <AOMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseAOMap <
+    string UIName  = "Use AO Map";
+    string UIGroup = "4c - AO";
+    int    UIOrder = 471;
+> = false;
+
+uniform float AOChannel <
+    string UIName   = "AO Channel  0=R 1=G 2=B 3=A";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 3.0; float UIStep = 1.0;
+    string UIGroup  = "4c - AO";
+    int    UIOrder  = 472;
+> = 0.0;
+
+uniform float AOStrength <
+    string UIName   = "AO Map Strength";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4c - AO";
+    int    UIOrder  = 473;
+> = 1.0;
+
+uniform float AOAffectsBand <
+    string UIName   = "AO Into Cel Band";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4c - AO";
+    int    UIOrder  = 474;
+> = 1.0;
+
+uniform float AOAffectsAmbient <
+    string UIName   = "AO On Ambient / Fill";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4c - AO";
+    int    UIOrder  = 475;
+> = 1.0;
+
+
+//-----------------------------------------------------------------------------
 //  Specular
 //-----------------------------------------------------------------------------
 uniform float SpecMode <
@@ -1343,10 +1410,18 @@ GLSLShader PS_Main
         float specSize   = UseLightMap ? ilm.b : 0.5;
         float matID      = UseLightMap ? ilm.a : 0.0;
 
-        float aoMask = 1.0;
-        if (UseLightMap) aoMask *= mix(1.0, ilm.g, ILMAoStrength);
-        if (UseVertexAO) aoMask *= PS_IN.vcol.g;
-        aoMask = sat(aoMask);
+        float ao = 1.0;
+        if (UseLightMap) ao *= mix(1.0, ilm.g, ILMAoStrength);
+        if (UseVertexAO) ao *= PS_IN.vcol.g;
+        if (UseAOMap) {
+            float m = pickChannel(texture(AOSampler, flipUV(uv)), AOChannel);
+            ao *= mix(1.0, m, AOStrength);
+        }
+        ao = sat(ao);
+
+        // The band and the ambient want different amounts of the same AO.
+        float aoMask   = mix(1.0, ao, AOAffectsBand);
+        float aoAmbient = mix(1.0, ao, AOAffectsAmbient);
 
         float rampRow = UseMatIDForRamp
                       ? floor(sat(matID) * max(RampRows - 1.0, 0.0) + 0.5)
@@ -1621,7 +1696,7 @@ GLSLShader PS_Main
 
             fill += (fAmb > 0.5) ? fRad : fRad * sat(dot(N, fL));
         }
-        fill *= albedo * FillLightScale;
+        fill *= albedo * FillLightScale * aoAmbient;
 
         //---- matcap -------------------------------------------------------
         vec3 matcap = vec3(0.0);
@@ -1648,7 +1723,7 @@ GLSLShader PS_Main
                    + fill
                    + matcap * albedo
                    + emission
-                   + albedo * AmbientColor;
+                   + albedo * AmbientColor * aoAmbient;
 
         //---- interior lines -----------------------------------------------
         // Last, so the ink sits on top of every lighting term -- a line that
