@@ -244,6 +244,34 @@ uniform float FillLightScale <
 
 
 //-----------------------------------------------------------------------------
+//  2b - Normal Edit  (Arc System Works)
+//
+//  "In order to get 2D-like shadows, Guilty Gear copy normals from a
+//  simplified model." The real normals track every muscle, so the terminator
+//  breaks into small busy shapes. A simplified normal field throws the shadow
+//  in a few big forms instead, which is what reads as hand-drawn.
+//
+//  Only the cel band uses this. Specular, rim and the outline keep the real
+//  normals, so the silhouette and highlights stay crisp.
+//
+//  Bake with gntshader.utils.mesh.bake_shade_normals(mesh, source=None).
+//-----------------------------------------------------------------------------
+uniform bool UseShadeNormal <
+    string UIName  = "Use Normal Edit";
+    string UIGroup = "2b - Normal Edit";
+    int    UIOrder = 250;
+> = false;
+
+uniform float ShadeNormalAmount <
+    string UIName   = "Normal Edit Amount";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "2b - Normal Edit";
+    int    UIOrder  = 251;
+> = 1.0;
+
+
+//-----------------------------------------------------------------------------
 //  Light direction override  (art-directed key light)
 //-----------------------------------------------------------------------------
 uniform bool UseLightOverride <
@@ -902,6 +930,7 @@ attribute APPDATA
     vec3 inBinormal : BINORMAL;
     vec2 inUV0      : TEXCOORD0;
     vec2 inOctNormal : TEXCOORD1;
+    vec2 inShadeNormal : TEXCOORD2;
     vec4 inColor0   : COLOR0;
 };
 
@@ -913,6 +942,7 @@ attribute SHADERDATA
     vec3 wBinormal;
     vec2 uv0;
     vec4 vcol;
+    vec3 wShadeNormal;
 };
 
 attribute OUTLINEDATA
@@ -1056,6 +1086,21 @@ GLSLShader VS_Main
         VS_OUT.uv0       = inUV0;
         VS_OUT.vcol      = inColor0;
 
+        // Normal Edit: the baked field is tangent space, so rebuild it here
+        // with the same Gram-Schmidt frame the bake used, then take it to
+        // world. Done per vertex because that is the resolution it was
+        // authored at -- interpolating the result is the point.
+        {
+            vec3 N = normalize(inNormal);
+            vec3 T = inTangent - N * dot(N, inTangent);
+            T = (length(T) > 1e-8) ? normalize(T) : normalize(inTangent);
+            vec3 B = cross(N, T);
+            if (dot(B, inBinormal) < 0.0) B = -B;
+
+            vec3 objShade = mat3(T, B, N) * octDecode(inShadeNormal);
+            VS_OUT.wShadeNormal = normalize((gWorldIT * vec4(objShade, 0.0)).xyz);
+        }
+
         gl_Position = gWVPXf * vec4(inPosition, 1.0);
     }
 }
@@ -1140,6 +1185,13 @@ GLSLShader PS_Main
             }
 
             Nband = normalize(mix(Ngeom, N, NormalDiffuseAmount));
+        }
+
+        // Normal Edit replaces the band normal outright -- that is the whole
+        // idea. Everything else on this pixel still uses N.
+        if (UseShadeNormal) {
+            Nband = normalize(mix(Nband, normalize(PS_IN.wShadeNormal),
+                                  ShadeNormalAmount));
         }
 
         //---- key light ----------------------------------------------------

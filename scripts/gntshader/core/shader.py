@@ -72,6 +72,19 @@ def set_shader_file(node, shader_file):
     the old one, and the numbers looked like a sign error in the maths.
     """
     path = shader_file.replace("\\", "/")
+
+    # Clearing .shader tears the attributes down and takes every texture
+    # connection with it, so the maps have to be remembered and re-plugged.
+    # Without this a reload silently leaves UseAlbedoMap on with nothing
+    # feeding it, and the whole model renders black.
+    textures = {}
+    if cmds.objExists(node + ".uniformParameters"):
+        for attr in cmds.getAttr(node + ".uniformParameters") or []:
+            if uniform_type(node, attr) == "texture":
+                existing = texture_path(node, attr)
+                if existing:
+                    textures[attr] = existing
+
     cmds.setAttr(node + ".shader", "", type="string")
     cmds.setAttr(node + ".shader", path, type="string")
 
@@ -83,8 +96,18 @@ def set_shader_file(node, shader_file):
     except RuntimeError:
         pass
 
+    for attr, texture in textures.items():
+        if cmds.objExists("{0}.{1}".format(node, attr)):
+            try:
+                set_texture(node, attr, texture)
+            except (ValueError, RuntimeError):
+                cmds.warning("GNTShader: lost texture on {0}.{1}".format(node, attr))
 
-def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None):
+    return textures
+
+
+def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None,
+                 shade_uv_set=None):
     """Point each vertex stream at a named UV / colour set on ``mesh``.
 
     Maya exposes the mapping as ``<varying>_Source`` string attributes holding
@@ -112,13 +135,17 @@ def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None):
     uv_sets = cmds.polyUVSet(shape, query=True, allUVSets=True) or []
     colour_sets = cmds.polyColorSet(shape, query=True, allColorSets=True) or []
 
+    ours = {env.SMOOTH_NORMAL_UV_SET, env.SHADE_NORMAL_UV_SET}
     if uv_set is None:
         # The texture UV set is whichever one is not ours.
-        candidates = [s for s in uv_sets if s != env.SMOOTH_NORMAL_UV_SET]
+        candidates = [s for s in uv_sets if s not in ours]
         uv_set = candidates[0] if candidates else (uv_sets[0] if uv_sets else None)
 
     if smooth_uv_set is None and env.SMOOTH_NORMAL_UV_SET in uv_sets:
         smooth_uv_set = env.SMOOTH_NORMAL_UV_SET
+
+    if shade_uv_set is None and env.SHADE_NORMAL_UV_SET in uv_sets:
+        shade_uv_set = env.SHADE_NORMAL_UV_SET
 
     if color_set is None:
         if env.PAINT_COLOR_SET in colour_sets:
@@ -133,6 +160,8 @@ def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None):
         wanted["Binormal"] = "binormal:" + uv_set
     if smooth_uv_set:
         wanted["TexCoord1"] = "uv:" + smooth_uv_set
+    if shade_uv_set:
+        wanted["TexCoord2"] = "uv:" + shade_uv_set
     if color_set:
         wanted["Color0"] = "color:" + color_set
 

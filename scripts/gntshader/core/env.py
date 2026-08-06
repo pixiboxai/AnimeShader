@@ -28,6 +28,11 @@ EYE_SHADER = os.path.join(SHADER_DIR, "GNTAnimeEye.ogsfx")
 PAINT_COLOR_SET = "GNT_paint"
 SMOOTH_NORMAL_UV_SET = "GNT_smoothNormal"
 
+# Normal Edit (Arc System Works): the cel band reads a deliberately simplified
+# normal so the shadow falls in big 2D shapes instead of tracking every muscle.
+# Baked octahedral, tangent space, read as TEXCOORD2.
+SHADE_NORMAL_UV_SET = "GNT_shadeNormal"
+
 
 def maya_version():
     """Return the running Maya version as an int, or 0 outside Maya."""

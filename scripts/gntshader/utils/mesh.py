@@ -297,6 +297,145 @@ def ensure_paint_set(mesh, color_set=None, default=(1.0, 1.0, 1.0, 1.0)):
     return color_set
 
 
+def _vertex_neighbours(fn):
+    """Adjacency list built from the polygon connectivity."""
+    counts, indices = fn.getVertices()
+    neighbours = [set() for _ in range(fn.numVertices)]
+    offset = 0
+    for count in counts:
+        corner = indices[offset:offset + count]
+        for i in range(count):
+            a = corner[i]
+            b = corner[(i + 1) % count]
+            neighbours[a].add(b)
+            neighbours[b].add(a)
+        offset += count
+    return neighbours
+
+
+def smoothed_normal_field(mesh, iterations=12, keep=0.25):
+    """Relax the vertex normals towards a simplified, large-shape field.
+
+    Arc System Works get their 2D-looking shadows by copying normals off a
+    *simplified* model. When there is no such model to hand, repeatedly
+    averaging each normal with its neighbours converges on much the same
+    thing: the muscle-by-muscle wobble goes, the big forms remain.
+
+    ``keep`` is how much of the original normal survives each pass -- lower is
+    smoother. Returns object-space normals, one per vertex.
+    """
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
+
+    normals = [fn.getVertexNormal(i, True, om.MSpace.kObject)
+               for i in range(fn.numVertices)]
+    neighbours = _vertex_neighbours(fn)
+
+    for _ in range(max(0, iterations)):
+        updated = []
+        for i, normal in enumerate(normals):
+            acc = om.MVector(normal) * keep
+            ring = neighbours[i]
+            if ring:
+                share = (1.0 - keep) / len(ring)
+                for j in ring:
+                    acc += om.MVector(normals[j]) * share
+            if acc.length() > 1e-9:
+                acc = acc.normal()
+            else:
+                acc = om.MVector(normal)
+            updated.append(acc)
+        normals = updated
+
+    return normals
+
+
+def transferred_normal_field(mesh, source):
+    """Object-space normals lifted off ``source`` at the closest point.
+
+    This is the technique as Guilty Gear Xrd actually does it: model a rough,
+    smooth stand-in of the character, then hand its normals to the real mesh.
+    """
+    target_dag = _dag_path(mesh)
+    target_fn = om.MFnMesh(target_dag)
+    source_fn = om.MFnMesh(_dag_path(source))
+
+    points = target_fn.getPoints(om.MSpace.kWorld)
+    out = []
+    for i in range(len(points)):
+        point = om.MPoint(points[i])
+        _closest, normal = source_fn.getClosestPointAndNormal(
+            point, om.MSpace.kWorld)[0:2]
+        out.append(om.MVector(normal).normal())
+
+    # Back into the target's object space, which is where the bake works.
+    inverse = target_dag.inclusiveMatrixInverse()
+    return [(v * om.MTransformationMatrix(inverse).asMatrix()).normal()
+            for v in out]
+
+
+def bake_shade_normals(mesh, source=None, iterations=12, keep=0.25, uv_set=None):
+    """Bake the Normal Edit field into its own UV set.
+
+    With ``source``, copies normals off that mesh. Without one, smooths the
+    mesh's own normals into the same kind of large-shape field.
+
+    Nothing on the mesh is overwritten -- the real normals stay put, and the
+    shader decides how far to lean on this for the cel band.
+    """
+    uv_set = uv_set or env.SHADE_NORMAL_UV_SET
+
+    if source:
+        field = transferred_normal_field(mesh, source)
+    else:
+        field = smoothed_normal_field(mesh, iterations=iterations, keep=keep)
+
+    target_node = _transform_of(mesh)
+    existing = cmds.polyUVSet(target_node, query=True, allUVSets=True) or []
+    if uv_set not in existing:
+        cmds.polyUVSet(target_node, create=True, uvSet=uv_set)
+
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
+    counts, indices = fn.getVertices()
+    tangents = fn.getTangents(om.MSpace.kObject)
+    binormals = fn.getBinormals(om.MSpace.kObject)
+
+    us = om.MFloatArray()
+    vs = om.MFloatArray()
+    deviation = 0.0
+
+    fv = 0
+    offset = 0
+    for face_id, count in enumerate(counts):
+        face_normals = fn.getFaceVertexNormals(face_id, om.MSpace.kObject)
+        for i in range(count):
+            vertex_id = indices[offset + i]
+            t, b, n = orthonormal_basis(om.MVector(face_normals[i]),
+                                        om.MVector(tangents[fv]),
+                                        om.MVector(binormals[fv]))
+            target = field[vertex_id]
+            deviation = max(deviation, math.degrees(math.acos(
+                max(-1.0, min(1.0, target * n)))))
+
+            ts = om.MVector(target * t, target * b, target * n)
+            if ts.length() > 1e-12:
+                ts = ts.normal()
+            u, v = oct_encode(ts)
+            us.append(u)
+            vs.append(v)
+            fv += 1
+        offset += count
+
+    fn.setUVs(us, vs, uv_set)
+    fn.assignUVs(counts, om.MIntArray(range(len(us))), uv_set)
+
+    return {"uv_set": uv_set,
+            "source": source or "(smoothed in place)",
+            "max_deviation_deg": deviation,
+            "vertices": len(field)}
+
+
 def measure_thickness(mesh, samples=None):
     """Local thickness at every vertex, by shooting a ray straight inwards.
 
