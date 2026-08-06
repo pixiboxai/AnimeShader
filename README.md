@@ -275,6 +275,40 @@ Cái thứ ba nguy hiểm nhất vì nó im lặng: nó từng làm hỏng nguy�
 đang chạy là bản cũ, còn số liệu thì trông y như một lỗi dấu trong công thức. Nếu bạn sửa
 shader mà viewport không đổi gì, nghi chỗ này trước tiên.
 
+### Khai báo đèn phải có `Space = "World"`
+
+Uniform đèn bắt buộc mang **cả `UIName` lẫn `Space = "World"`**, đúng như
+`AutodeskUberShader.ogsfx`. Thiếu `Space` trên `DIRECTION` thì Maya không phân loại được
+tham số, và **GLSL nhận giá trị 0** — đèn trong scene không đóng góp gì hết, trong khi
+Attribute Editor vẫn hiện số liệu hoàn toàn bình thường.
+
+Triệu chứng: xoay đèn không thay đổi gì, và nhân vật vẫn sáng đều kể cả khi đèn ở sau
+lưng — vì toàn bộ độ sáng đến từ `ShadowColor` và `AmbientColor` chứ không từ đèn.
+
+Đo trước khi sửa: quả cầu đọc **0% sáng ở mọi hướng đèn**. Sau khi sửa: 89.7% khi đèn
+chiếu vào mặt, 0.0% khi đèn ở sau lưng.
+
+Lưu ý chẩn đoán: attribute **vẫn** hiện kiểu `matrix` và `GLSLShader -q -li` **vẫn** báo
+`undefined` kể cả sau khi đã sửa. Đó là triệu chứng, không phải nguyên nhân — đừng đuổi
+theo chúng như tôi đã làm.
+
+### Bóng vẫn sáng là do `ShadowColor`, không phải rò sáng
+
+Cel shading dùng bóng là một **màu**, không phải chỗ tối. Với `ShadowColor` mặc định
+(0.62, 0.58, 0.68), nhân vật nằm hoàn toàn trong bóng vẫn sáng ~62%. Đo phân rã trên
+nhân vật khi đèn ở sau lưng:
+
+| Thành phần | Đóng góp độ sáng |
+|---|---|
+| `ShadowColor` | **125.7** (75%) |
+| `AmbientColor` | 34.7 (21%) |
+| Rim | 6.2 (4%) |
+| Specular | 0 |
+
+Muốn bóng sâu hơn thì hạ `ShadowColor` trước, rồi `AmbientColor`. `RimFollowLight` mặc
+định 0.25 nghĩa là rim vẫn giữ 75% cường độ ở phía không có đèn — nâng lên gần 1.0 nếu
+muốn rim chỉ xuất hiện bên được chiếu sáng.
+
 ---
 
 ## Hướng tiếp theo

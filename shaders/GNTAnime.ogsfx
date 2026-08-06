@@ -742,32 +742,40 @@ uniform float OutlineNoiseCutoff <
 //-----------------------------------------------------------------------------
 //  Lights  (Maya binds these from the scene)
 //-----------------------------------------------------------------------------
-uniform int   Light0Type      : LIGHTTYPE      < string Object = "Light 0"; string UIWidget = "None"; > = 4;
-uniform vec3  Light0Color     : LIGHTCOLOR     < string Object = "Light 0"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
-uniform float Light0Intensity : LIGHTINTENSITY < string Object = "Light 0"; > = 1.0;
-uniform vec3  Light0Pos       : POSITION       < string Object = "Light 0"; string Space = "World"; > = {0.0, 100.0, 0.0};
-uniform vec3  Light0Dir       : DIRECTION      < string Object = "Light 0"; > = {0.0, -1.0, 0.0};
-uniform float Light0Decay     : DECAYRATE      < string Object = "Light 0"; > = 0.0;
-uniform float Light0Cone      : HOTSPOT        < string Object = "Light 0"; > = 0.46;
-uniform float Light0Falloff   : FALLOFF        < string Object = "Light 0"; > = 0.7;
+// Light parameters must carry UIName *and* Space = "World", exactly the way
+// AutodeskUberShader.ogsfx declares them. Leave Space off DIRECTION and Maya
+// fails to classify the parameter: `GLSLShader -q -li` reports the light group
+// as "undefined", the uniform degrades into a generic matrix attribute, and
+// the GLSL receives zeros -- so the scene light contributes nothing at all
+// while the Attribute Editor still shows perfectly sensible values.
+// Measured before the fix: a sphere read 0% lit from every light angle.
 
-uniform int   Light1Type      : LIGHTTYPE      < string Object = "Light 1"; string UIWidget = "None"; > = 4;
-uniform vec3  Light1Color     : LIGHTCOLOR     < string Object = "Light 1"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
-uniform float Light1Intensity : LIGHTINTENSITY < string Object = "Light 1"; > = 0.0;
-uniform vec3  Light1Pos       : POSITION       < string Object = "Light 1"; string Space = "World"; > = {0.0, 100.0, 0.0};
-uniform vec3  Light1Dir       : DIRECTION      < string Object = "Light 1"; > = {0.0, -1.0, 0.0};
-uniform float Light1Decay     : DECAYRATE      < string Object = "Light 1"; > = 0.0;
-uniform float Light1Cone      : HOTSPOT        < string Object = "Light 1"; > = 0.46;
-uniform float Light1Falloff   : FALLOFF        < string Object = "Light 1"; > = 0.7;
+uniform int   Light0Type      : LIGHTTYPE      < string UIName = "Light 0 Type";      string Object = "Light 0"; string UIWidget = "None"; > = 4;
+uniform vec3  Light0Color     : LIGHTCOLOR     < string UIName = "Light 0 Color";     string Object = "Light 0"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light0Intensity : LIGHTINTENSITY < string UIName = "Light 0 Intensity"; string Object = "Light 0"; > = 1.0;
+uniform vec3  Light0Pos       : POSITION       < string UIName = "Light 0 Position";  string Space = "World"; string Object = "Light 0"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light0Dir       : DIRECTION      < string UIName = "Light 0 Direction"; string Space = "World"; string Object = "Light 0"; > = {0.0, -1.0, 0.0};
+uniform float Light0Decay     : DECAYRATE      < string UIName = "Light 0 Decay";     string Object = "Light 0"; > = 0.0;
+uniform float Light0Cone      : HOTSPOT        < string UIName = "Light 0 Cone";      string Object = "Light 0"; > = 0.46;
+uniform float Light0Falloff   : FALLOFF        < string UIName = "Light 0 Penumbra";  string Object = "Light 0"; > = 0.7;
 
-uniform int   Light2Type      : LIGHTTYPE      < string Object = "Light 2"; string UIWidget = "None"; > = 4;
-uniform vec3  Light2Color     : LIGHTCOLOR     < string Object = "Light 2"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
-uniform float Light2Intensity : LIGHTINTENSITY < string Object = "Light 2"; > = 0.0;
-uniform vec3  Light2Pos       : POSITION       < string Object = "Light 2"; string Space = "World"; > = {0.0, 100.0, 0.0};
-uniform vec3  Light2Dir       : DIRECTION      < string Object = "Light 2"; > = {0.0, -1.0, 0.0};
-uniform float Light2Decay     : DECAYRATE      < string Object = "Light 2"; > = 0.0;
-uniform float Light2Cone      : HOTSPOT        < string Object = "Light 2"; > = 0.46;
-uniform float Light2Falloff   : FALLOFF        < string Object = "Light 2"; > = 0.7;
+uniform int   Light1Type      : LIGHTTYPE      < string UIName = "Light 1 Type";      string Object = "Light 1"; string UIWidget = "None"; > = 4;
+uniform vec3  Light1Color     : LIGHTCOLOR     < string UIName = "Light 1 Color";     string Object = "Light 1"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light1Intensity : LIGHTINTENSITY < string UIName = "Light 1 Intensity"; string Object = "Light 1"; > = 0.0;
+uniform vec3  Light1Pos       : POSITION       < string UIName = "Light 1 Position";  string Space = "World"; string Object = "Light 1"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light1Dir       : DIRECTION      < string UIName = "Light 1 Direction"; string Space = "World"; string Object = "Light 1"; > = {0.0, -1.0, 0.0};
+uniform float Light1Decay     : DECAYRATE      < string UIName = "Light 1 Decay";     string Object = "Light 1"; > = 0.0;
+uniform float Light1Cone      : HOTSPOT        < string UIName = "Light 1 Cone";      string Object = "Light 1"; > = 0.46;
+uniform float Light1Falloff   : FALLOFF        < string UIName = "Light 1 Penumbra";  string Object = "Light 1"; > = 0.7;
+
+uniform int   Light2Type      : LIGHTTYPE      < string UIName = "Light 2 Type";      string Object = "Light 2"; string UIWidget = "None"; > = 4;
+uniform vec3  Light2Color     : LIGHTCOLOR     < string UIName = "Light 2 Color";     string Object = "Light 2"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};
+uniform float Light2Intensity : LIGHTINTENSITY < string UIName = "Light 2 Intensity"; string Object = "Light 2"; > = 0.0;
+uniform vec3  Light2Pos       : POSITION       < string UIName = "Light 2 Position";  string Space = "World"; string Object = "Light 2"; > = {0.0, 100.0, 0.0};
+uniform vec3  Light2Dir       : DIRECTION      < string UIName = "Light 2 Direction"; string Space = "World"; string Object = "Light 2"; > = {0.0, -1.0, 0.0};
+uniform float Light2Decay     : DECAYRATE      < string UIName = "Light 2 Decay";     string Object = "Light 2"; > = 0.0;
+uniform float Light2Cone      : HOTSPOT        < string UIName = "Light 2 Cone";      string Object = "Light 2"; > = 0.46;
+uniform float Light2Falloff   : FALLOFF        < string UIName = "Light 2 Penumbra";  string Object = "Light 2"; > = 0.7;
 
 uniform mat4 gShadowVP : ViewProjection < string UIWidget = "None"; >;
 
