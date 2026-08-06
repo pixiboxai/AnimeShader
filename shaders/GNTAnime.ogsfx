@@ -504,6 +504,43 @@ uniform float SpecSoftness <
     int    UIOrder  = 505;
 > = 0.02;
 
+// Paint where the highlight may land. The ILM red channel already does this
+// when an ILM map is in play; this is the standalone version for when it is
+// not, or when the highlight wants its own map at its own resolution.
+uniform texture2D SpecMaskMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Highlight Mask";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 510;
+>;
+uniform sampler2D SpecMaskSampler = sampler_state {
+    Texture = <SpecMaskMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseSpecMask <
+    string UIName  = "Use Highlight Mask";
+    string UIGroup = "5 - Specular";
+    int    UIOrder = 511;
+> = false;
+
+uniform float SpecMaskChannel <
+    string UIName   = "Highlight Mask Channel  0=R 1=G 2=B 3=A";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 3.0; float UIStep = 1.0;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 512;
+> = 0.0;
+
+uniform bool SpecMaskInvert <
+    string UIName  = "Invert Highlight Mask";
+    string UIGroup = "5 - Specular";
+    int    UIOrder = 513;
+> = false;
+
 // GBFR: tint the highlight through a ramp instead of banding it
 uniform texture2D SpecRampMap <
     string ResourceName = "";
@@ -1462,6 +1499,12 @@ GLSLShader PS_Main
                                      SpecThreshold + SpecSoftness, raw);
             specular    = SpecColor * step_ * SpecIntensity * specMask * sat(ndl);
         }
+        if (UseSpecMask) {
+            float sm = pickChannel(texture(SpecMaskSampler, flipUV(uv)), SpecMaskChannel);
+            if (SpecMaskInvert) sm = 1.0 - sm;
+            specular *= sm;
+        }
+
         specular *= keyRadiance;
 
         //---- rim ----------------------------------------------------------
