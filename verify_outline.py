@@ -134,31 +134,45 @@ def read_png(path):
     return width, height, channels, out
 
 
-def count_pixels(path):
-    """Count red pixels and covered pixels in a render.
+def classify(path, base_mask=None):
+    """Split a render into background / red / covered.
 
-    ogsRender writes a transparent background, so coverage comes from alpha
-    when the file has it and from "not mid grey" otherwise.
+    Returns ``(total, red_outside, red_inside, covered, mask)``.
+
+    ``base_mask`` is the coverage of the same probe rendered *without* the
+    outline. Red landing outside it is the outline ring doing its job; red
+    landing inside it is the hull poking through the surface -- cracks at hard
+    edges, or z-fighting. Total red area cannot tell those apart, which is why
+    the first version of this comparison drew the wrong conclusion.
     """
     width, height, channels, px = read_png(path)
 
-    red = 0
+    mask = bytearray(width * height)
+    red_inside = 0
+    red_outside = 0
     covered = 0
-    for i in range(0, len(px), channels):
+
+    for index in range(width * height):
+        i = index * channels
         r, g, b = px[i], px[i + 1], px[i + 2]
         alpha = px[i + 3] if channels == 4 else 255
 
-        if alpha > 16:
-            covered += 1
-            if r > 128 and g < 77 and b < 77:
-                red += 1
-        elif channels == 3 and (abs(r - 128) > 24 or abs(g - 128) > 24
-                                or abs(b - 128) > 24):
-            covered += 1
-            if r > 128 and g < 77 and b < 77:
-                red += 1
+        is_covered = alpha > 16
+        if channels == 3:
+            is_covered = (abs(r - 128) > 24 or abs(g - 128) > 24
+                          or abs(b - 128) > 24)
+        if not is_covered:
+            continue
 
-    return width * height, red, covered
+        covered += 1
+        mask[index] = 1
+        if r > 128 and g < 77 and b < 77:
+            if base_mask is not None and base_mask[index]:
+                red_inside += 1
+            else:
+                red_outside += 1
+
+    return width * height, red_outside, red_inside, covered, mask
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +264,17 @@ def verify():
             cmds.setAttr(full, value)
 
     cmds.displayRGBColor("background", 0.5, 0.5, 0.5)
-    cmds.viewFit("persp", all=True)
+
+    # Place the camera by hand. viewFit depends on there being an active model
+    # panel, which is not guaranteed when this runs over a command bridge --
+    # and a probe that lands on one pixel produces a confident wrong verdict.
+    try:
+        cmds.xform("persp", worldSpace=True, translation=(9.0, 7.0, 9.0))
+        cmds.viewLookAt("persp", position=(0.0, 0.0, 0.0))
+    except RuntimeError as exc:
+        log("  ! could not place the camera: %s" % exc)
+
+    base_mask = [None]
 
     def measure(tag, technique, smooth_normal=None):
         cmds.setAttr(node + ".technique", technique, type="string")
@@ -260,19 +284,36 @@ def verify():
                 cmds.setAttr(full, smooth_normal)
         cmds.refresh(force=True)
         path = _render("gntVerify_" + tag)
-        total, red, covered = count_pixels(path)
+
+        total, red_out, red_in, covered, mask = classify(path, base_mask[0])
         log("-" * 68)
         log("%s" % tag)
-        log("  image     : %s" % path)
-        log("  red px    : %d" % red)
-        log("  covered px: %d / %d" % (covered, total))
-        return red, covered
+        log("  image      : %s" % path)
+        log("  red outside: %d   (the outline ring)" % red_out)
+        log("  red inside : %d   (cracks / z-fighting -- lower is better)" % red_in)
+        log("  covered px : %d / %d" % (covered, total))
+        return red_out, red_in, covered, mask
 
     # --- does the outline pass run at all? -------------------------------
-    red_off, cov_off = measure("noOutline", "Anime")
-    red_on, cov_on = measure("outline_smoothNormal", "AnimeOutline", smooth_normal=1)
+    red_off, _in_off, cov_off, mask_off = measure("noOutline", "Anime")
+    base_mask[0] = mask_off
+
+    smooth_out, smooth_in, cov_on, _m = measure(
+        "outline_smoothNormal", "AnimeOutline", smooth_normal=1)
+    red_on = smooth_out + smooth_in
 
     log("=" * 68)
+
+    # Refuse to judge the shader when the probe barely made it into frame.
+    # A one-pixel cube produces numbers that look like a failure but say
+    # nothing about the shader.
+    MIN_COVERAGE = 500
+    if cov_off < MIN_COVERAGE:
+        log("INCONCLUSIVE  the probe covers only %d pixels." % cov_off)
+        log("      The camera is not framing it, so these counts mean nothing.")
+        log("      Check that 'persp' exists and is not parented or locked.")
+        return
+
     if red_on > 50 and red_on > red_off * 10 + 50:
         log("PASS  outline pass RUNS.")
         log("      red pixels %d -> %d, coverage %d -> %d"
@@ -293,21 +334,28 @@ def verify():
     log("")
     log("=" * 68)
     log("Smooth-normal comparison (cube = worst case, every edge is hard)")
-    red_raw, _cov_raw = measure("outline_rawNormal", "AnimeOutline", smooth_normal=0)
+    log("")
+    log("Extruding along raw face normals pulls the six faces apart, so red")
+    log("leaks through the cracks *inside* the silhouette. Total red area")
+    log("cannot see that -- it just goes up. Judge on inside-red instead.")
+
+    raw_out, raw_in, _cov_raw, _m = measure(
+        "outline_rawNormal", "AnimeOutline", smooth_normal=0)
 
     log("=" * 68)
-    log("  raw mesh normal   : %d red px" % red_raw)
-    log("  baked smooth norm : %d red px" % red_on)
-    if red_raw <= 0:
-        log("INCONCLUSIVE  raw-normal pass produced no outline at all.")
+    log("                     ring (outside)   cracks (inside)")
+    log("  raw mesh normal  : %14d   %15d" % (raw_out, raw_in))
+    log("  baked smooth norm: %14d   %15d" % (smooth_out, smooth_in))
+
+    if raw_in == 0 and smooth_in == 0:
+        log("INCONCLUSIVE  neither pass leaks red inside the silhouette, so")
+        log("      this probe does not exercise the problem. Judge on a real")
+        log("      character mesh with hard edges under skinning.")
+    elif smooth_in < raw_in:
+        drop = (raw_in - smooth_in) / float(raw_in) * 100.0
+        log("PASS  smooth normals cut the leaking by %.1f%%." % drop)
     else:
-        gain = (red_on - red_raw) / float(red_raw) * 100.0
-        log("  difference        : %+.1f%%" % gain)
-        if red_on > red_raw:
-            log("PASS  smooth normals give a longer / less broken outline.")
-        else:
-            log("NOTE  no gain here. On this probe the raw normals already")
-            log("      close the ring; judge on a real character mesh.")
+        log("NOTE  smooth normals did not reduce the leaking here.")
 
 
 try:

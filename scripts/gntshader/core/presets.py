@@ -27,6 +27,23 @@ def load_file(path):
         return json.load(handle)
 
 
+def presets_for(shader_filename, directory=None):
+    """Preset names built for a given effect file.
+
+    Presets without a ``shader`` field are treated as belonging to the body
+    shader, which is what they were before the field existed.
+    """
+    matches = []
+    for name, path in preset_files(directory).items():
+        try:
+            data = load_file(path)
+        except (IOError, ValueError):
+            continue
+        if data.get("shader", "GNTAnime.ogsfx") == shader_filename:
+            matches.append(name)
+    return sorted(matches)
+
+
 def apply(node, preset, skip_textures=False):
     """Apply a preset dict (or a preset name) to a shader node.
 

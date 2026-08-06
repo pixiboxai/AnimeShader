@@ -39,8 +39,10 @@ Yêu cầu: Maya 2024 hoặc 2027, plugin `glslShader`, và Viewport 2.0 đặt 
 1. **Chuẩn bị mesh** — chọn mesh → `Prepare Selected Meshes`.
    Bake smooth normal (trung bình theo trọng số góc, đưa về tangent space) vào color set
    để viền outline không bị nứt ở cạnh cứng.
-2. **Tạo shader** — `Create`, rồi `Assign to Selection`.
-3. **Chọn preset** — `genshin_like`, `gbfr_like`, hoặc `mmd_like`.
+2. **Tạo shader** — chọn effect ở dropdown `Effect` (`GNTAnime.ogsfx` cho thân/tóc/mặt,
+   `GNTAnimeEye.ogsfx` cho mắt), bấm `Create`, rồi `Assign to Selection`.
+3. **Chọn preset** — danh sách chỉ hiện preset hợp với effect đang chạy, nên không áp
+   nhầm preset mắt lên shader thân.
 4. **Chỉnh chi tiết** — bấm `Attr Editor`. Toàn bộ tham số đã được nhóm sẵn
    (Base / Shading / ILM / Specular / Hair / Face / Rim / Emission / MatCap / Outline).
 5. **Mặt** — chọn joint đầu → `Link (live)` để shader biết hướng trước/phải của đầu.
@@ -94,7 +96,7 @@ Mắt cần mô hình riêng nên tách thành `GNTAnimeEye.ogsfx`, không nhồ
 - **Bóng mí mắt** — gradient tối dần ở đỉnh nhãn cầu.
 - `Unlit` để tắt hẳn ảnh hưởng đèn scene, kiểu mắt phẳng của anime.
 
-Dùng: tạo shader trỏ vào file đó rồi áp preset `eye_default`.
+Trong UI: chọn `GNTAnimeEye.ogsfx` ở dropdown `Effect` rồi `Create`. Bằng Python:
 
 ```python
 from gntshader.core import shader, presets, env
@@ -133,9 +135,22 @@ Shader đọc hai color set, **thứ tự tạo quyết định binding**:
   97 uniform, 14 UI group, 3 slot đèn bind đúng.
 - Vertex stream bind đủ: `Position, Normal, Color0, Tangent, Binormal, TexCoord0, TexCoord1`.
 - Bake smooth normal chạy đạt trên cube / sphere / torus; round-trip octahedral sai số 0.
+- **Cả hai shader compile sạch** trong Maya 2024: `GNTAnime.ogsfx` 2 technique / 97 uniform,
+  `GNTAnimeEye.ogsfx` 1 technique / 47 uniform, diagnostics rỗng.
 - **Outline pass chạy thật.** Maya *có* thực thi cả hai pass cùng khai báo
   `drawContext = "colorPass"`. Đo bằng cách đếm pixel: cùng một probe, đổi technique,
-  pixel đỏ đi từ **0 → 625**, vùng phủ từ 7604 → 8189. Không cần fallback nhân đôi mesh.
+  pixel đỏ đi từ **0 → 1033**. Không cần fallback nhân đôi mesh.
+- **Smooth normal có tác dụng thật**, đo trên cube (mọi cạnh đều cứng):
+
+  | | Viền (ngoài silhouette) | Nứt (trong silhouette) |
+  |---|---|---|
+  | Normal thường | 1003 px | **159 px** |
+  | Smooth normal | 964 px | **69 px** |
+
+  Giảm **56.6%** lượng đỏ rò qua khe nứt. Lưu ý cách đo: đẩy theo face normal làm 6 mặt
+  tách rời, và khe giữa chúng cũng lòi đỏ — nên **tổng** diện tích đỏ là chỉ số sai, nó
+  đếm vết nứt như thể là viền. Phải tách đỏ ngoài silhouette (viền thật) khỏi đỏ trong
+  silhouette (nứt).
 
 Chạy lại bất cứ lúc nào:
 
@@ -203,12 +218,12 @@ Kết quả ghi ra `verify_outline_result.txt`.
 
 - **Backface culling** — nếu bật trên object thì outline biến mất, vì pass outline giữ
   mặt sau bằng `gl_FrontFacing` chứ không phải bằng render state (OGSFX không có).
-- **Chưa đo** mức độ smooth normal thực sự vá được vết nứt viền ở cạnh cứng so với
-  dùng normal thường. `verify_outline.py` có sẵn phép so, chỉ chưa chạy.
 - Bake và shader đều trực chuẩn hoá khung tangent (Gram-Schmidt) trước khi mã hoá /
   giải mã. Trên primitive của Maya thì **không cần** — đo được tangent lệch vuông góc
   đúng 0.0000°. Giữ lại để phòng mesh nhân vật unwrap tay có UV méo; nếu gặp viền dày
   mỏng thất thường thì đây là chỗ đáng nghi đầu tiên.
+- Mọi con số ở trên đo trên primitive. **Chưa chạy trên mesh nhân vật thật** — nơi UV
+  unwrap tay, có skinning, và normal map cùng tác động.
 
 ### Hai ràng buộc của Maya đã phải xử lý
 

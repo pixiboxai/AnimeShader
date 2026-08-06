@@ -7,6 +7,8 @@ the shader, preparing meshes for the outline, presets, linking the head basis,
 and surfacing compile errors.
 """
 
+import os
+
 from maya import cmds
 
 from ..core import env, plugin, presets, shader
@@ -150,6 +152,13 @@ class GNTShaderWindow(QtWidgets.QWidget):
         layout.addLayout(row)
 
         row = QtWidgets.QHBoxLayout()
+        self.effect_combo = QtWidgets.QComboBox()
+        self.effect_combo.setToolTip("Which .ogsfx a new shader node will use")
+        row.addWidget(QtWidgets.QLabel("Effect"))
+        row.addWidget(self.effect_combo, 1)
+        layout.addLayout(row)
+
+        row = QtWidgets.QHBoxLayout()
         self.technique_combo = QtWidgets.QComboBox()
         self.technique_combo.currentIndexChanged.connect(self._on_technique_changed)
         row.addWidget(QtWidgets.QLabel("Technique"))
@@ -277,8 +286,18 @@ class GNTShaderWindow(QtWidgets.QWidget):
                 self.shader_combo.setCurrentIndex(index)
         self.shader_combo.blockSignals(False)
 
-        self.preset_combo.clear()
-        self.preset_combo.addItems(sorted(presets.preset_files().keys()))
+        effect = self.effect_combo.currentText()
+        self.effect_combo.blockSignals(True)
+        self.effect_combo.clear()
+        if os.path.isdir(env.SHADER_DIR):
+            self.effect_combo.addItems(
+                sorted(name for name in os.listdir(env.SHADER_DIR)
+                       if name.endswith(".ogsfx")))
+        if effect:
+            index = self.effect_combo.findText(effect)
+            if index >= 0:
+                self.effect_combo.setCurrentIndex(index)
+        self.effect_combo.blockSignals(False)
 
         self._sync_node()
 
@@ -295,6 +314,19 @@ class GNTShaderWindow(QtWidgets.QWidget):
                 if index >= 0:
                     self.technique_combo.setCurrentIndex(index)
         self.technique_combo.blockSignals(False)
+
+        # Only offer presets built for whatever effect this node is running --
+        # applying an eye preset to the body shader skips every key silently.
+        wanted = self.preset_combo.currentText()
+        self.preset_combo.clear()
+        if node:
+            effect = os.path.basename(cmds.getAttr(node + ".shader") or "")
+            names = presets.presets_for(effect) if effect else []
+        else:
+            names = sorted(presets.preset_files().keys())
+        self.preset_combo.addItems(names)
+        if wanted in names:
+            self.preset_combo.setCurrentIndex(names.index(wanted))
 
         for widget in self._sliders:
             widget.set_node(node)
@@ -323,11 +355,30 @@ class GNTShaderWindow(QtWidgets.QWidget):
             self._show_diagnostics(node)
 
     def on_create(self):
+        effect = self.effect_combo.currentText() or "GNTAnime.ogsfx"
+        path = os.path.join(env.SHADER_DIR, effect)
+        name = os.path.splitext(effect)[0]
+
         try:
-            node, _sg = shader.create()
+            node, _sg = shader.create(name=name, shader_file=path, technique=None)
         except (RuntimeError, IOError) as exc:
             self._log("Create failed: {0}".format(exc))
             return
+
+        # The effect is only parsed once the viewport draws it, so the
+        # technique list is empty until after a refresh.
+        cmds.refresh(force=True)
+
+        # Pick the technique the effect actually advertises. Which one is the
+        # sensible default differs per effect, so ask rather than assume.
+        available = shader.list_techniques(node)
+        for preferred in ("AnimeOutline", "AnimeEye"):
+            if preferred in available:
+                shader.set_technique(node, preferred)
+                break
+        else:
+            if available:
+                shader.set_technique(node, available[0])
         self.refresh()
         index = self.shader_combo.findText(node)
         if index >= 0:
