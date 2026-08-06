@@ -504,6 +504,37 @@ uniform float SpecSoftness <
     int    UIOrder  = 505;
 > = 0.02;
 
+// Tint the highlight per pixel. GBFR does this with a ramp driven by the
+// highlight's own strength; a map gives direct control instead -- skin can
+// take a warm sheen while metal on the same mesh goes cold and hard.
+uniform texture2D SpecColorMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "Highlight Color Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 520;
+>;
+uniform sampler2D SpecColorSampler = sampler_state {
+    Texture = <SpecColorMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseSpecColorMap <
+    string UIName  = "Use Highlight Color Map";
+    string UIGroup = "5 - Specular";
+    int    UIOrder = 521;
+> = false;
+
+uniform float SpecColorMapAmount <
+    string UIName   = "Highlight Color Amount";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "5 - Specular";
+    int    UIOrder  = 522;
+> = 1.0;
+
 // Paint where the highlight may land. The ILM red channel already does this
 // when an ILM map is in play; this is the standalone version for when it is
 // not, or when the highlight wants its own map at its own resolution.
@@ -1463,6 +1494,13 @@ GLSLShader PS_Main
         }
 
         //---- specular -----------------------------------------------------
+        vec3 specTint = SpecColor;
+        if (UseSpecColorMap) {
+            vec3 sc = texture(SpecColorSampler, flipUV(uv)).rgb;
+            if (AlbedoIsSRGB) sc = toLinear(sc);
+            specTint = mix(SpecColor, SpecColor * sc, SpecColorMapAmount);
+        }
+
         vec3 specular = vec3(0.0);
         int  smode    = int(SpecMode + 0.5);
 
@@ -1480,7 +1518,7 @@ GLSLShader PS_Main
             vec3  T   = normalize(PS_IN.wBinormal);   // hair strands run along V
             vec3  Ts  = normalize(N * (shift + AnisoBias) + T);
             float s   = strandSpecular(Ts, H, AnisoExponent);
-            specular  = SpecColor * s * SpecIntensity * sat(ndl) * specMask * hairAO;
+            specular  = specTint * s * SpecIntensity * sat(ndl) * specMask * hairAO;
             diffuse  *= mix(1.0, hairRamp, float(UseHairMask));
         }
         else if (smode == 2) {
@@ -1489,7 +1527,7 @@ GLSLShader PS_Main
             float w     = sat(SpecRampWidth);
             float rampU = sat(w * raw - w + 1.0);
             vec3  tint  = texture(SpecRampSampler, flipUV(vec2(rampU, 0.5))).rgb;
-            specular    = SpecColor * tint * raw * SpecIntensity * specMask * sat(ndl);
+            specular    = specTint * tint * raw * SpecIntensity * specMask * sat(ndl);
         }
         else if (smode == 1) {
             // hard cel highlight
@@ -1497,7 +1535,7 @@ GLSLShader PS_Main
             float raw   = pow(sat(dot(N, H)), gloss);
             float step_ = smoothstep(SpecThreshold - SpecSoftness,
                                      SpecThreshold + SpecSoftness, raw);
-            specular    = SpecColor * step_ * SpecIntensity * specMask * sat(ndl);
+            specular    = specTint * step_ * SpecIntensity * specMask * sat(ndl);
         }
         if (UseSpecMask) {
             float sm = pickChannel(texture(SpecMaskSampler, flipUV(uv)), SpecMaskChannel);
