@@ -346,12 +346,20 @@ def set_texture(node, attr, path, colour_space=None):
 
     existing = cmds.listConnections(full, source=True, destination=False,
                                     type="file") or []
+    wanted_name = "{0}_{1}_file".format(node, attr)
+
     if existing:
         file_node = existing[0]
+    elif cmds.objExists(wanted_name) and cmds.objectType(wanted_name) == "file":
+        # Reconnect the node we made last time rather than leaving it orphaned
+        # and adding another; a few reload cycles otherwise litter the scene
+        # with <shader>_<attr>_file1, _file2, ...
+        file_node = wanted_name
+        cmds.connectAttr(file_node + ".outColor", full, force=True)
     else:
         file_node = cmds.shadingNode("file", asTexture=True,
                                      isColorManaged=True,
-                                     name="{0}_{1}_file".format(node, attr))
+                                     name=wanted_name)
         placer = cmds.shadingNode("place2dTexture", asUtility=True,
                                   name="{0}_{1}_p2d".format(node, attr))
         for src, dst in (("outUV", "uvCoord"),

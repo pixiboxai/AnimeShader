@@ -354,6 +354,15 @@ uniform float InteriorLineSoftness <
     int    UIOrder  = 413;
 > = 0.02;
 
+// Authoring conventions differ: Arc System Works paint the lines dark on a
+// white field, plenty of artists do the reverse. Rather than demand a repaint,
+// flip it here.
+uniform bool InteriorLineInvert <
+    string UIName  = "Lines Are White On Black";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 415;
+> = false;
+
 uniform float InteriorLineOpacity <
     string UIName   = "Interior Line Opacity";
     string UIWidget = "Slider";
@@ -1392,9 +1401,10 @@ GLSLShader PS_Main
         // Last, so the ink sits on top of every lighting term -- a line that
         // brightens with the key light stops reading as ink.
         if (UseInteriorLines && UseLightMap) {
+            float mask = InteriorLineInvert ? (1.0 - ilm.a) : ilm.a;
             float line = smoothstep(InteriorLineThreshold - InteriorLineSoftness,
                                     InteriorLineThreshold + InteriorLineSoftness,
-                                    ilm.a);
+                                    mask);
             color = mix(color, InteriorLineColor,
                         (1.0 - line) * InteriorLineOpacity);
         }
