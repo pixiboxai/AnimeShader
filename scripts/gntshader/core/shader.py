@@ -386,6 +386,35 @@ def set_texture(node, attr, path, colour_space=None):
     return file_node
 
 
+def reload_textures(node):
+    """Make Maya re-read every texture feeding this shader from disk.
+
+    Maya caches file textures in memory. Re-exporting a map on disk changes
+    nothing in the viewport until something pokes the file node, so you end up
+    judging a look against the previous version of the texture -- and if the
+    new one differs in polarity or channel packing, the shader settings you
+    then dial in are tuned to the wrong image.
+
+    Returns ``{attr: path}`` for what was refreshed.
+    """
+    done = {}
+    for attr in cmds.getAttr(node + ".uniformParameters") or []:
+        if uniform_type(node, attr) != "texture":
+            continue
+        files = cmds.listConnections("{0}.{1}".format(node, attr),
+                                     source=True, destination=False,
+                                     type="file") or []
+        if not files:
+            continue
+        path = cmds.getAttr(files[0] + ".fileTextureName")
+        if not path:
+            continue
+        cmds.setAttr(files[0] + ".fileTextureName", "", type="string")
+        cmds.setAttr(files[0] + ".fileTextureName", path, type="string")
+        done[attr] = path
+    return done
+
+
 def texture_path(node, attr):
     """Path currently feeding a texture uniform, or '' when nothing is."""
     full = "{0}.{1}".format(node, attr)
