@@ -244,6 +244,59 @@ uniform bool UseVertexAO <
     int    UIOrder = 404;
 > = false;
 
+// Arc System Works (Guilty Gear Xrd) treat the ILM green channel as a painted
+// *shadow threshold* rather than an AO multiply: the artist decides where the
+// terminator sits per pixel, modulated by vertex colour red. Blend towards it.
+uniform float ILMShadowBias <
+    string UIName   = "ILM G Drives Shadow Threshold";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 405;
+> = 0.0;
+
+uniform bool ILMBiasUseVertexColor <
+    string UIName  = "Threshold x Vertex Color R";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 406;
+> = false;
+
+
+//-----------------------------------------------------------------------------
+//  SSS map  --  per-pixel shadow tint (GGXrd)
+//
+//  A single ShadowColor makes every material fall into the same hue. GGXrd
+//  paints the shadow colour into its own map, so skin goes warm and cloth
+//  goes cool in the same shadow.
+//-----------------------------------------------------------------------------
+uniform texture2D SSSMap <
+    string ResourceName = "";
+    string ResourceType = "2D";
+    string UIName   = "SSS / Shadow Tint Map";
+    string UIWidget = "FilePicker";
+    string UIGroup  = "4b - SSS";
+    int    UIOrder  = 450;
+>;
+uniform sampler2D SSSSampler = sampler_state {
+    Texture = <SSSMap>;
+    TEXTURE_MIN_FILTER = LINEAR;  TEXTURE_MAG_FILTER = LINEAR;
+    TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
+};
+
+uniform bool UseSSSMap <
+    string UIName  = "Use SSS Map";
+    string UIGroup = "4b - SSS";
+    int    UIOrder = 451;
+> = false;
+
+uniform float SSSStrength <
+    string UIName   = "SSS Strength";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4b - SSS";
+    int    UIOrder  = 452;
+> = 1.0;
+
 
 //-----------------------------------------------------------------------------
 //  Specular
@@ -652,6 +705,17 @@ uniform sampler2D OutlineNoiseSampler = sampler_state {
     TEXTURE_WRAP_S = REPEAT;      TEXTURE_WRAP_T = REPEAT;
 };
 
+// GGXrd jitters the extrusion distance per vertex, so the line breathes the
+// way an inked line does. This varies the width; UseOutlineNoise below breaks
+// the line up instead. They stack.
+uniform float OutlineWidthVariation <
+    string UIName   = "Outline Width Variation";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "11 - Outline";
+    int    UIOrder  = 1113;
+> = 0.0;
+
 uniform bool UseOutlineNoise <
     string UIName  = "Use Outline Noise";
     string UIGroup = "11 - Outline";
@@ -824,6 +888,13 @@ GLSLShader Common
         return pow(sinTH, exponent);
     }
 
+    // Cheap per-vertex randomness, used to make the outline width breathe.
+    float hash21(vec2 p)
+    {
+        p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+        return fract(sin(p.x + p.y + 20.0) * 53758.5453123);
+    }
+
     // Unpack a unit vector from the 2 floats stored in a UV set.
     vec3 octDecode(vec2 f)
     {
@@ -941,9 +1012,27 @@ GLSLShader PS_Main
         float ndl = dot(N, L);
         vec3  H   = normalize(L + V);
 
+        //---- shadow tint --------------------------------------------------
+        // GGXrd: the shadow colour is painted per pixel, not picked globally.
+        vec3 shadowTint = ShadowColor;
+        if (UseSSSMap) {
+            vec3 sss = texture(SSSSampler, flipUV(uv)).rgb;
+            if (AlbedoIsSRGB) sss = toLinear(sss);
+            shadowTint = mix(ShadowColor, sss, SSSStrength);
+        }
+
+        //---- shadow threshold ---------------------------------------------
+        // GGXrd paints the terminator position into ILM green.
+        float threshold = ShadowThreshold;
+        if (UseLightMap && ILMShadowBias > 0.0) {
+            float painted = ilm.g;
+            if (ILMBiasUseVertexColor) painted *= PS_IN.vcol.r;
+            threshold = mix(ShadowThreshold, 1.0 - painted, ILMShadowBias);
+        }
+
         //---- diffuse band -------------------------------------------------
         vec3 band = celDiffuse(ndl, aoMask, rampRow, UseRampMap, RampSampler,
-                               ShadowColor, ShadowThreshold, ShadowSoftness, HalfLambert);
+                               shadowTint, threshold, ShadowSoftness, HalfLambert);
 
         //---- face SDF overrides the band on the face ----------------------
         if (UseFaceSDF) {
@@ -961,7 +1050,7 @@ GLSLShader PS_Main
             float threshold = (1.0 - FdotL) * 0.5;
             float faceLit   = smoothstep(threshold - FaceSDFSoftness,
                                          threshold + FaceSDFSoftness, sdf);
-            band = mix(ShadowColor, vec3(1.0), faceLit);
+            band = mix(shadowTint, vec3(1.0), faceLit);
         }
 
         vec3 diffuse = albedo * band * keyRadiance;
@@ -1131,6 +1220,12 @@ GLSLShader VS_Outline
         float width = OutlineWidth * 0.01;
         if (OutlineUseVertexColor) width *= inColor0.r;
 
+        // Jitter the width per vertex so the line reads as inked, not vector.
+        if (OutlineWidthVariation > 0.0) {
+            float jitter = hash21(inPosition.xy * inPosition.yz);
+            width *= mix(1.0, jitter, OutlineWidthVariation);
+        }
+
         // Keep the line a constant thickness on screen.
         if (OutlineScreenSpace) {
             float dist = length(gViewIXf[3].xyz - wp.xyz);
@@ -1171,10 +1266,21 @@ GLSLShader PS_Outline
 
         vec3 col = OutlineColor;
 
-        if (OutlineTintFromAlbedo && UseAlbedoMap) {
-            vec3 a = texture(AlbedoSampler, flipUV(PS_IN.uv0)).rgb;
-            if (AlbedoIsSRGB) a = toLinear(a);
-            col = mix(col, col * a, OutlineTintAmount);
+        // GGXrd tints the line with albedo *and* the SSS map, which is what
+        // stops it reading as a flat black vector stroke.
+        if (OutlineTintFromAlbedo) {
+            vec3 tint = vec3(1.0);
+            if (UseAlbedoMap) {
+                vec3 a = texture(AlbedoSampler, flipUV(PS_IN.uv0)).rgb;
+                if (AlbedoIsSRGB) a = toLinear(a);
+                tint *= a;
+            }
+            if (UseSSSMap) {
+                vec3 s = texture(SSSSampler, flipUV(PS_IN.uv0)).rgb;
+                if (AlbedoIsSRGB) s = toLinear(s);
+                tint *= s;
+            }
+            col = mix(col, col * tint, OutlineTintAmount);
         }
 
         if (UseOutlineNoise) {

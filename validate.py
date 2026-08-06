@@ -130,7 +130,14 @@ def validate(shader_file=SHADER, keep=True):
     node = cmds.shadingNode("GLSLShader", asShader=True, name=PROBE_PREFIX + "Shader")
     sg = cmds.sets(name=node + "SG", empty=True, renderable=True, noSurfaceShader=True)
     cmds.connectAttr(node + ".outColor", sg + ".surfaceShader", force=True)
+    # Clear before setting: Maya caches the compiled effect against the path,
+    # so a fresh node pointed at an edited .ogsfx can still get the old build.
+    cmds.setAttr(node + ".shader", "", type="string")
     cmds.setAttr(node + ".shader", shader_file.replace("\\", "/"), type="string")
+    try:
+        mel.eval("GLSLShader %s -r" % node)
+    except RuntimeError:
+        pass
     cmds.sets(sphere, edit=True, forceElement=sg)
 
     # The effect is parsed on the next draw.

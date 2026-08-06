@@ -2,5 +2,9 @@ __pycache__/
 *.pyc
 validate_result.txt
 verify_outline_result.txt
+*_report.txt
+char_result.txt
+beauty_result.txt
+sweep_result.txt
 reference/
 docs/

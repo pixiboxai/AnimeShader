@@ -114,14 +114,37 @@ khi preset không khớp shader đang chạy, và test `test_shader_contract.py`
 
 ## Vertex streams
 
-Shader đọc hai color set, **thứ tự tạo quyết định binding**:
-
-| Binding | Color set | Nội dung |
+| Stream | Nguồn | Nội dung |
 |---|---|---|
-| COLOR0 | `GNT_paint` | R = hệ số dày outline, G = AO |
-| COLOR1 | `GNT_smoothNormal` | RGB = smooth normal ở tangent space |
+| `COLOR0` | color set `GNT_paint` | R = hệ số dày outline, G = AO |
+| `TEXCOORD0` | UV set gốc của mesh | UV texture |
+| `TEXCOORD1` | UV set `GNT_smoothNormal` | smooth normal, octahedral, tangent space |
 
-`Prepare Selected Meshes` tạo đúng thứ tự. Nút `Check Colour Sets` để kiểm tra lại.
+**Bind theo tên, không theo thứ tự.** Maya cho mỗi stream một attribute
+`<stream>_Source` chứa chuỗi kiểu `uv:map1` / `color:colorSet`. Mặc định đúng là những
+tên đó — mà mesh production hiếm khi đặt tên vậy: mesh GGXrd tôi thử có `UV1`, `UV2`, `Col`,
+nên nếu dựa vào thứ tự thì shader sẽ đọc `UV2` của nhân vật thay cho smooth normal và đọc
+`Col` thay cho paint set, **sai hoàn toàn mà không báo lỗi gì**.
+
+`shader.assign()` tự gọi `bind_streams()` để nối đích danh. Gọi tay khi cần:
+
+```python
+from gntshader.core import shader
+shader.bind_streams(node, "body_geo")
+print(shader.stream_bindings(node))
+```
+
+## Texture
+
+Uniform texture **không phải string** — Maya sinh ra chúng dưới dạng `float3` connectable
+(`_Type = "texture"`), nên phải nối một `file` node vào:
+
+```python
+shader.set_texture(node, "AlbedoMap", "D:/tex/base.png")
+shader.set_texture(node, "LightMap", "D:/tex/ilm.png", colour_space="Raw")
+```
+
+`set_param()` tự nhận ra và chuyển hướng khi bạn đưa vào một đường dẫn.
 
 ---
 
