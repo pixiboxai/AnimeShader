@@ -437,6 +437,14 @@ uniform bool UseSSSMap <
     int    UIOrder = 206;
 > = false;
 
+uniform float ShadowColorMode <
+    string UIName   = "Shadow Map Mode  0=Multiply 1=Replace";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 1.0;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 207;
+> = 0.0;
+
 uniform float SSSStrength <
     string UIName   = "Shadow Map Blend";
     string UIWidget = "Slider";
@@ -1023,7 +1031,8 @@ GLSLShader Common
     // Diffuse band: half-lambert -> threshold -> ramp texture or two-tone mix.
     vec3 celDiffuse(float ndl, float aoMask, float rampRow, bool useRamp,
                     sampler2D rampSmp, vec3 shadowCol,
-                    float threshold, float softness, float halfLambertAmt)
+                    float threshold, float softness, float halfLambertAmt,
+                    out float bandFactor)
     {
         float lambert = mix(sat(ndl), ndl * 0.5 + 0.5, halfLambertAmt);
         float lit     = sat(lambert * aoMask);
@@ -1031,10 +1040,12 @@ GLSLShader Common
         if (useRamp) {
             // Ramp rows are stacked vertically; sample the middle of the row.
             float v = (rampRow + 0.5) / max(RampRows, 1.0);
+            bandFactor = lit;
             return texture(rampSmp, flipUV(vec2(lit, v))).rgb;
         }
 
         float band = smoothstep(threshold - softness, threshold + softness, lit);
+        bandFactor = band;
         return mix(shadowCol, vec3(1.0), band);
     }
 
@@ -1252,8 +1263,10 @@ GLSLShader PS_Main
         }
 
         //---- diffuse band -------------------------------------------------
+        float bandFactor;
         vec3 band = celDiffuse(ndlBand, aoMask, rampRow, UseRampMap, RampSampler,
-                               shadowTint, threshold, ShadowSoftness, HalfLambert);
+                               shadowTint, threshold, ShadowSoftness, HalfLambert,
+                               bandFactor);
 
         //---- face SDF overrides the band on the face ----------------------
         if (UseFaceSDF) {
@@ -1272,9 +1285,23 @@ GLSLShader PS_Main
             float faceLit   = smoothstep(threshold - FaceSDFSoftness,
                                          threshold + FaceSDFSoftness, sdf);
             band = mix(shadowTint, vec3(1.0), faceLit);
+            bandFactor = faceLit;
         }
 
-        vec3 diffuse = albedo * band * keyRadiance;
+        // Two ways to spend a shadow colour map, and which one is right
+        // depends entirely on how it was painted:
+        //   Multiply  - the map is a tint over the albedo (Guilty Gear Xrd)
+        //   Replace   - the map already IS the finished shadow colour
+        // Measured on this character: albedo luminance 0.83, SSS map 0.45. A
+        // map that dark is a finished colour, not a tint -- multiplying it
+        // drops the shadow to 45% and pushes R/G from 1.22 to 1.70, which
+        // reads as a muddy red rather than skin in shade.
+        vec3 diffuse;
+        if (ShadowColorMode > 0.5 && UseSSSMap) {
+            diffuse = mix(shadowTint, albedo, bandFactor) * keyRadiance;
+        } else {
+            diffuse = albedo * band * keyRadiance;
+        }
 
         //---- specular -----------------------------------------------------
         vec3 specular = vec3(0.0);
