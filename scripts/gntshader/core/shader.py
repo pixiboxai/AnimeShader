@@ -99,12 +99,14 @@ def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None):
 
     Returns a dict of what was bound.
     """
+    # Skip intermediate shapes: a skinned character carries a "...Orig" mesh
+    # whose sets the viewport never reads.
     shape = mesh
-    if cmds.objectType(shape) != "mesh":
+    if cmds.objectType(shape) != "mesh" or cmds.getAttr(shape + ".intermediateObject"):
         shapes = cmds.listRelatives(mesh, shapes=True, fullPath=True,
-                                    noIntermediate=True) or []
+                                    noIntermediate=True, type="mesh") or []
         if not shapes:
-            raise ValueError("No mesh shape under {0}".format(mesh))
+            raise ValueError("No renderable mesh shape under {0}".format(mesh))
         shape = shapes[0]
 
     uv_sets = cmds.polyUVSet(shape, query=True, allUVSets=True) or []

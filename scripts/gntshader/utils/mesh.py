@@ -29,12 +29,35 @@ from ..core import env
 MERGE_TOLERANCE = 1e-5
 
 
+def _shape_of(mesh):
+    """Resolve a transform or shape name to the renderable mesh shape.
+
+    ``extendToShape()`` is not good enough here: a skinned character carries an
+    intermediate ``...Orig`` shape, and picking that one means every colour and
+    UV set gets written somewhere the viewport never reads.
+    """
+    if cmds.objectType(mesh) == "mesh" and not cmds.getAttr(mesh + ".intermediateObject"):
+        return mesh
+
+    shapes = cmds.listRelatives(mesh, shapes=True, noIntermediate=True,
+                                fullPath=True, type="mesh") or []
+    if not shapes:
+        raise ValueError("No renderable mesh shape under {0}".format(mesh))
+    return shapes[0]
+
+
+def _transform_of(mesh):
+    """The transform holding ``mesh``, whether a shape or a transform is given."""
+    if cmds.objectType(mesh) == "mesh":
+        parents = cmds.listRelatives(mesh, parent=True, fullPath=True) or []
+        return parents[0] if parents else mesh
+    return mesh
+
+
 def _dag_path(mesh):
     sel = om.MSelectionList()
-    sel.add(mesh)
-    dag = sel.getDagPath(0)
-    dag.extendToShape()
-    return dag
+    sel.add(_shape_of(mesh))
+    return sel.getDagPath(0)
 
 
 def _position_key(point, tolerance=MERGE_TOLERANCE):
@@ -160,8 +183,7 @@ def bake_smooth_normals(mesh, uv_set=None):
             "unwrap the mesh first.".format(mesh)
         )
 
-    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
-    target_node = transform[0] if transform else mesh
+    target_node = _transform_of(mesh)
 
     # Create the UV set *before* taking the MFnMesh below. A function set held
     # across cmds.polyUVSet(create=True) does not pick the new set up: setUVs
@@ -234,19 +256,131 @@ def ensure_paint_set(mesh, color_set=None, default=(1.0, 1.0, 1.0, 1.0)):
     """
     color_set = color_set or env.PAINT_COLOR_SET
 
-    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
-    target_node = transform[0] if transform else mesh
+    target_node = _transform_of(mesh)
 
     existing = cmds.polyColorSet(target_node, query=True, allColorSets=True) or []
     if color_set in existing:
         return color_set
 
+    # Remember what the artist had current, so creating ours does not quietly
+    # repoint their vertex-colour tools at a different set.
+    previous = cmds.polyColorSet(target_node, query=True, currentColorSet=True)
+
     cmds.polyColorSet(target_node, create=True, colorSet=color_set,
                       representation="RGBA")
-    cmds.polyColorSet(target_node, currentColorSet=True, colorSet=color_set)
-    cmds.polyColorPerVertex(target_node, rgb=default[:3], a=default[3],
-                            colorDisplayOption=False)
+
+    # Fill through the API rather than polyColorPerVertex: that command wants a
+    # component selection and fails outright on meshes that already carry
+    # colour sets, which production meshes usually do.
+    #
+    # Take the function set *after* creating the colour set. A MFnMesh held
+    # across the create call does not see the new set and
+    # setCurrentColorSetName raises "Object does not exist" -- the same trap as
+    # the UV set in bake_smooth_normals().
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
+    count = fn.numVertices
+
+    colors = om.MColorArray()
+    indices = om.MIntArray()
+    for i in range(count):
+        colors.append(om.MColor(default))
+        indices.append(i)
+
+    fn.setCurrentColorSetName(color_set)
+    fn.setVertexColors(colors, indices)
+
+    if previous and previous in (cmds.polyColorSet(target_node, query=True,
+                                                   allColorSets=True) or []):
+        cmds.polyColorSet(target_node, currentColorSet=True, colorSet=previous)
+
     return color_set
+
+
+def measure_thickness(mesh, samples=None):
+    """Local thickness at every vertex, by shooting a ray straight inwards.
+
+    A finger is a couple of units thick; a torso is tens. The inverted-hull
+    outline does not know that -- it pushes every vertex out by the same
+    world-space distance, so a line that looks right on the chest swallows the
+    fingers whole.
+
+    Returns ``[thickness_per_vertex]``; vertices where the ray escapes get the
+    largest measured value, since an open edge is not a thin feature.
+    """
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
+
+    points = fn.getPoints(om.MSpace.kWorld)
+    bbox = fn.boundingBox
+    far = bbox.width + bbox.height + bbox.depth
+    accel = fn.autoUniformGridParams()
+
+    out = []
+    escaped = []
+    for i in range(len(points)):
+        normal = fn.getVertexNormal(i, True, om.MSpace.kWorld)
+        origin = om.MFloatPoint(points[i] - normal * 1e-3)
+        direction = om.MFloatVector(-normal)
+
+        hit = fn.closestIntersection(origin, direction, om.MSpace.kWorld,
+                                     far, False, accelParams=accel)
+        if hit and hit[0] is not None and hit[1] > 1e-4:
+            out.append(hit[1])
+        else:
+            out.append(None)
+            escaped.append(i)
+
+    known = [t for t in out if t is not None]
+    fallback = max(known) if known else 1.0
+    for i in escaped:
+        out[i] = fallback
+    return out
+
+
+def bake_outline_width(mesh, color_set=None, min_scale=0.15, percentile=0.80):
+    """Write a per-vertex outline width multiplier into the paint set's red.
+
+    Scale is local thickness over a reference thickness (the ``percentile``
+    quantile of the mesh), clamped to ``[min_scale, 1]``. Fingers and ears come
+    out thin, torso and thighs stay at full width.
+
+    Turn on ``OutlineUseVertexColor`` for the shader to read it.
+    """
+    color_set = color_set or env.PAINT_COLOR_SET
+    ensure_paint_set(mesh)
+
+    thickness = measure_thickness(mesh)
+    ordered = sorted(thickness)
+    reference = ordered[min(int(len(ordered) * percentile), len(ordered) - 1)]
+    if reference <= 0.0:
+        reference = 1.0
+
+    dag = _dag_path(mesh)
+    fn = om.MFnMesh(dag)
+
+    previous = fn.currentColorSetName()
+    fn.setCurrentColorSetName(color_set)
+    existing = fn.getVertexColors(color_set)
+
+    colors = om.MColorArray()
+    indices = om.MIntArray()
+    for i, t in enumerate(thickness):
+        scale = max(min_scale, min(1.0, t / reference))
+        old = existing[i] if i < len(existing) else om.MColor((1.0, 1.0, 1.0, 1.0))
+        colors.append(om.MColor((scale, old.g, old.b, old.a)))
+        indices.append(i)
+
+    fn.setVertexColors(colors, indices)
+    if previous:
+        try:
+            fn.setCurrentColorSetName(previous)
+        except RuntimeError:
+            pass
+
+    return {"reference_thickness": reference,
+            "min": min(thickness), "max": max(thickness),
+            "vertices": len(thickness)}
 
 
 def prepare(mesh):
@@ -274,13 +408,11 @@ def prepare_selection():
 
 def color_set_order(mesh):
     """Colour sets in binding order. Only the first one reaches the shader."""
-    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
-    target_node = transform[0] if transform else mesh
+    target_node = _transform_of(mesh)
     return cmds.polyColorSet(target_node, query=True, allColorSets=True) or []
 
 
 def uv_set_order(mesh):
     """UV sets in binding order: index 0 -> TEXCOORD0, index 1 -> TEXCOORD1."""
-    transform = cmds.listRelatives(mesh, parent=True, fullPath=True)
-    target_node = transform[0] if transform else mesh
+    target_node = _transform_of(mesh)
     return cmds.polyUVSet(target_node, query=True, allUVSets=True) or []

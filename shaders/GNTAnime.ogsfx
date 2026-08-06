@@ -122,7 +122,7 @@ uniform float NormalMapSpace <
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 1.0;
     string UIGroup  = "1b - Normal";
-    int    UIOrder  = 152;
+    int    UIOrder  = 153;
 > = 0.0;
 
 // Maya, Substance and most DCC bakes are OpenGL (+Y up). Unreal and a lot of
@@ -131,7 +131,7 @@ uniform float NormalMapSpace <
 uniform bool NormalFlipGreen <
     string UIName  = "Flip Green (DirectX map)";
     string UIGroup = "1b - Normal";
-    int    UIOrder = 153;
+    int    UIOrder = 154;
 > = false;
 
 uniform float NormalDiffuseAmount <
@@ -139,7 +139,7 @@ uniform float NormalDiffuseAmount <
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
     string UIGroup  = "1b - Normal";
-    int    UIOrder  = 154;
+    int    UIOrder  = 155;
 > = 0.25;
 
 uniform bool UseAlphaClip <
@@ -208,7 +208,7 @@ uniform float ShadowThreshold <
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
     string UIGroup  = "2 - Shading";
-    int    UIOrder  = 205;
+    int    UIOrder  = 208;
 > = 0.5;
 
 uniform float ShadowSoftness <
@@ -216,7 +216,7 @@ uniform float ShadowSoftness <
     string UIWidget = "Slider";
     float  UIMin = 0.001; float UIMax = 0.5; float UIStep = 0.005;
     string UIGroup  = "2 - Shading";
-    int    UIOrder  = 206;
+    int    UIOrder  = 209;
 > = 0.03;
 
 uniform float HalfLambert <
@@ -224,14 +224,14 @@ uniform float HalfLambert <
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
     string UIGroup  = "2 - Shading";
-    int    UIOrder  = 207;
+    int    UIOrder  = 210;
 > = 1.0;
 
 uniform vec3 AmbientColor <
     string UIName   = "Ambient Color";
     string UIWidget = "ColorPicker";
     string UIGroup  = "2 - Shading";
-    int    UIOrder  = 208;
+    int    UIOrder  = 211;
 > = {0.18, 0.18, 0.22};
 
 uniform float FillLightScale <
@@ -239,7 +239,7 @@ uniform float FillLightScale <
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 2.0; float UIStep = 0.05;
     string UIGroup  = "2 - Shading";
-    int    UIOrder  = 209;
+    int    UIOrder  = 212;
 > = 0.35;
 
 
@@ -291,6 +291,49 @@ uniform bool UseLightMap <
     int    UIOrder = 401;
 > = false;
 
+//  Interior lines -- the ILM alpha channel (Arc System Works' own breakdown).
+//
+//  A silhouette outline alone always reads as empty: GGXrd draws the line work
+//  *inside* the shape from a painted mask, and that is most of what sells the
+//  ink look. Their note on authoring it: stretch the UVs along each line so it
+//  does not stair-step across texels.
+uniform bool UseInteriorLines <
+    string UIName  = "Interior Lines (ILM alpha)";
+    string UIGroup = "4 - ILM Mask";
+    int    UIOrder = 410;
+> = false;
+
+uniform vec3 InteriorLineColor <
+    string UIName   = "Interior Line Color";
+    string UIWidget = "ColorPicker";
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 411;
+> = {0.08, 0.05, 0.07};
+
+uniform float InteriorLineThreshold <
+    string UIName   = "Interior Line Threshold";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 412;
+> = 0.90;
+
+uniform float InteriorLineSoftness <
+    string UIName   = "Interior Line Softness";
+    string UIWidget = "Slider";
+    float  UIMin = 0.001; float UIMax = 0.4; float UIStep = 0.005;
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 413;
+> = 0.02;
+
+uniform float InteriorLineOpacity <
+    string UIName   = "Interior Line Opacity";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "4 - ILM Mask";
+    int    UIOrder  = 414;
+> = 1.0;
+
 uniform bool UseMatIDForRamp <
     string UIName  = "Material ID Picks Ramp Row";
     string UIGroup = "4 - ILM Mask";
@@ -330,19 +373,20 @@ uniform bool ILMBiasUseVertexColor <
 
 
 //-----------------------------------------------------------------------------
-//  SSS map  --  per-pixel shadow tint (GGXrd)
+//  Shadow colour map  --  per-pixel shadow tint (GGXrd calls this the SSS map)
 //
-//  A single ShadowColor makes every material fall into the same hue. GGXrd
-//  paints the shadow colour into its own map, so skin goes warm and cloth
-//  goes cool in the same shadow.
+//  A single ShadowColor drags every material into the same hue. GGXrd paints
+//  the shadow colour into its own map instead, so skin goes warm and cloth
+//  goes cool inside the same shadow. Lives next to ShadowColor in the UI
+//  because that is the value it replaces.
 //-----------------------------------------------------------------------------
 uniform texture2D SSSMap <
     string ResourceName = "";
     string ResourceType = "2D";
-    string UIName   = "SSS / Shadow Tint Map";
+    string UIName   = "Shadow Color Map";
     string UIWidget = "FilePicker";
-    string UIGroup  = "4b - SSS";
-    int    UIOrder  = 450;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 208;
 >;
 uniform sampler2D SSSSampler = sampler_state {
     Texture = <SSSMap>;
@@ -351,17 +395,17 @@ uniform sampler2D SSSSampler = sampler_state {
 };
 
 uniform bool UseSSSMap <
-    string UIName  = "Use SSS Map";
-    string UIGroup = "4b - SSS";
-    int    UIOrder = 451;
+    string UIName  = "Use Shadow Color Map";
+    string UIGroup = "2 - Shading";
+    int    UIOrder = 206;
 > = false;
 
 uniform float SSSStrength <
-    string UIName   = "SSS Strength";
+    string UIName   = "Shadow Map Blend";
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
-    string UIGroup  = "4b - SSS";
-    int    UIOrder  = 452;
+    string UIGroup  = "2 - Shading";
+    int    UIOrder  = 210;
 > = 1.0;
 
 
@@ -1291,6 +1335,17 @@ GLSLShader PS_Main
                    + matcap * albedo
                    + emission
                    + albedo * AmbientColor;
+
+        //---- interior lines -----------------------------------------------
+        // Last, so the ink sits on top of every lighting term -- a line that
+        // brightens with the key light stops reading as ink.
+        if (UseInteriorLines && UseLightMap) {
+            float line = smoothstep(InteriorLineThreshold - InteriorLineSoftness,
+                                    InteriorLineThreshold + InteriorLineSoftness,
+                                    ilm.a);
+            color = mix(color, InteriorLineColor,
+                        (1.0 - line) * InteriorLineOpacity);
+        }
 
         outColor = vec4(color, 1.0);
     }
