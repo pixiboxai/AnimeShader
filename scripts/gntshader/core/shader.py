@@ -12,6 +12,7 @@ Attribute contract on Maya's ``GLSLShader`` node (verified against
 """
 
 import os
+import re
 
 from maya import cmds
 import maya.mel as mel
@@ -432,6 +433,8 @@ def set_params(node, mapping):
     """
     skipped = []
     for attr, value in mapping.items():
+        if is_light_param(attr):
+            continue
         try:
             set_param(node, attr, value)
         except (ValueError, RuntimeError):
@@ -439,14 +442,30 @@ def set_params(node, mapping):
     return skipped
 
 
+# Uniforms Maya fills in from the scene lights. They look like ordinary
+# parameters but writing them is destructive: a preset that carries
+# Light0Intensity will drop stale numbers onto the node and switch
+# "use implicit lighting" off, after which the shader stops following the
+# scene lights at all. Two objects given the same preset then end up lit by
+# different things, which is exactly how it went wrong on Hiro.
+_LIGHT_PARAM = re.compile(r"^Light\d+[A-Z]")
+
+
+def is_light_param(attr):
+    return bool(_LIGHT_PARAM.match(attr))
+
+
 def dump_params(node):
     """Read every uniform back into a plain dict.
 
     Texture uniforms come back as the file path feeding them, so a captured
-    preset can rebuild the connection later.
+    preset can rebuild the connection later. Light parameters are left out --
+    they belong to the scene, not to the look.
     """
     out = {}
     for attr in list_uniforms(node):
+        if is_light_param(attr):
+            continue
         try:
             if uniform_type(node, attr) == "texture":
                 path = texture_path(node, attr)
