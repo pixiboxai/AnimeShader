@@ -477,12 +477,21 @@ def measure_thickness(mesh, samples=None):
     return out
 
 
-def bake_outline_width(mesh, color_set=None, min_scale=0.15, percentile=0.80):
+def bake_outline_width(mesh, color_set=None, min_scale=0.15, percentile=0.80,
+                       reference=None):
     """Write a per-vertex outline width multiplier into the paint set's red.
 
-    Scale is local thickness over a reference thickness (the ``percentile``
-    quantile of the mesh), clamped to ``[min_scale, 1]``. Fingers and ears come
-    out thin, torso and thighs stay at full width.
+    Scale is local thickness over a reference thickness, clamped to
+    ``[min_scale, 1]``. Fingers and ears come out thin, torso and thighs stay
+    at full width.
+
+    ``reference`` defaults to this mesh's own ``percentile`` quantile, which is
+    right for a single object and wrong for a character: each mesh then
+    normalises to its own scale, so a multiplier of 1.0 means "as thick as this
+    mesh gets" rather than an absolute size. Body, head and hair end up with
+    visibly different line weights from the same OutlineWidth. Pass one shared
+    reference -- ``character_reference()`` works it out -- to keep the whole
+    character on one scale.
 
     Turn on ``OutlineUseVertexColor`` for the shader to read it.
     """
@@ -490,8 +499,9 @@ def bake_outline_width(mesh, color_set=None, min_scale=0.15, percentile=0.80):
     ensure_paint_set(mesh)
 
     thickness = measure_thickness(mesh)
-    ordered = sorted(thickness)
-    reference = ordered[min(int(len(ordered) * percentile), len(ordered) - 1)]
+    if reference is None:
+        ordered = sorted(thickness)
+        reference = ordered[min(int(len(ordered) * percentile), len(ordered) - 1)]
     if reference <= 0.0:
         reference = 1.0
 
@@ -520,6 +530,22 @@ def bake_outline_width(mesh, color_set=None, min_scale=0.15, percentile=0.80):
     return {"reference_thickness": reference,
             "min": min(thickness), "max": max(thickness),
             "vertices": len(thickness)}
+
+
+def character_reference(meshes, percentile=0.80):
+    """One reference thickness for a whole character.
+
+    Takes the quantile across every vertex of every piece, so the outline
+    scale means the same thing on the body, the head and the hair.
+    """
+    everything = []
+    for mesh in meshes:
+        everything.extend(measure_thickness(mesh))
+    if not everything:
+        return 1.0
+    everything.sort()
+    idx = min(int(len(everything) * percentile), len(everything) - 1)
+    return everything[idx] or 1.0
 
 
 def prepare(mesh):
