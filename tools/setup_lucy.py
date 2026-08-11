@@ -147,29 +147,46 @@ def run(base_preset=BASE_PRESET, log_path=os.path.join(PROJECT, "lucy_setup.txt"
         gshader.set_texture(node, "SSSMap",
                             "%s/%s_Sss.png" % (TEX, atlas), colour_space="Raw")
 
-        gshader.set_params(node, {
+        skipped = gshader.set_params(node, {
             "UseAlbedoMap": 1,
             "AlbedoIsSRGB": 1,          # colour management is off in this scene
             "UseLightMap": 1,           # ILM: spec / shadow / size / lines
-            "ILMAoStrength": 0.65,
+
+            # ILM green is NOT occlusion. GGXrd paints the terminator position
+            # into it: 0.5 means "wherever the light puts it", brighter means
+            # "stay lit", darker means "stay in shadow". Multiplying it into AO
+            # instead -- which is what this script did first -- darkens the
+            # whole model by about a third, because the neutral value is 0.5,
+            # and throws away the authored shadow shapes entirely.
+            "ILMAoStrength": 0.0,
+            "ILMShadowBias": 1.0,
+            "ILMBiasUseVertexColor": 0,   # our vcol.r carries outline width
+
             "UseSSSMap": 1,
-            "ShadowColorMode": 1.0,     # multiply, the GGXrd behaviour
-            "SSSStrength": 0.85,
+            "ShadowColorMode": 1.0,     # shadow colour comes from the map
+            "SSSStrength": 1.0,
             "UseInteriorLines": 1,      # ilm.a is a binary line mask
             "InteriorLineOpacity": 0.85,
             "InteriorLineThreshold": 0.5,
             "InteriorLineSoftness": 0.05,
+            "OutlineTintFromAlbedo": 1,
+            "OutlineTintAmount": 0.60,
             "OutlineUseVertexColor": 1,
             "OutlineWidth": OUTLINE_WIDTH.get(name, 0.80),
         })
+        if skipped:
+            _log(out, "  !! %s skipped: %s" % (name, sorted(skipped)))
 
         if spec.get("hair"):
+            # The ILM already says where the hair highlight goes (R intensity,
+            # B size), which is how the game does it. SpecMode 3 (Kajiya-Kay)
+            # is available and looks good, but it is a different look, not the
+            # authored one.
             gshader.set_params(node, {
-                "SpecMode": 3.0,        # Kajiya-Kay strand highlight
-                "AnisoShiftIntensity": 0.35,
-                "AnisoExponent": 48.0,
-                "AnisoBias": 0.20,
-                "SpecIntensity": 1.0,
+                "SpecMode": 1.0,
+                "SpecIntensity": 1.2,
+                "SpecThreshold": 0.50,
+                "SpecSoftness": 0.02,
             })
         if spec.get("face"):
             gshader.set_params(node, {
