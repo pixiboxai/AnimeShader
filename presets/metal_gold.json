@@ -1,0 +1,66 @@
+{
+  "description": "Polished gold: warm saturated body, tight hot highlight, warm shadow, matcap reflection.",
+  "name": "metal_gold",
+  "parameters": {
+    "AOAffectsAmbient": 1.0,
+    "AOAffectsBand": 1.0,
+    "AlbedoIsSRGB": 0,
+    "AmbientColor": [
+      0.09,
+      0.07,
+      0.04
+    ],
+    "BaseColor": [
+      0.47,
+      0.39,
+      0.24
+    ],
+    "FillLightScale": 0.15,
+    "HalfLambert": 0.0,
+    "MatCapIntensity": 1.0,
+    "MatCapMap": "<project>/textures/matcap_gold.png",
+    "OutlineColor": [
+      0.1,
+      0.06,
+      0.02
+    ],
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.45,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.1,
+    "OutlineZOffset": 2.0,
+    "RimAlbedoTint": 0.4,
+    "RimColor": [
+      1.0,
+      0.92,
+      0.7
+    ],
+    "RimFollowLight": 0.35,
+    "RimIntensity": 0.9,
+    "RimPower": 4.0,
+    "RimUpMask": 0.4,
+    "ShadowColor": [
+      0.3,
+      0.18,
+      0.06
+    ],
+    "ShadowSoftness": 0.02,
+    "ShadowThreshold": 0.5,
+    "SpecColor": [
+      1.0,
+      0.88,
+      0.55
+    ],
+    "SpecGloss": 90.0,
+    "SpecIntensity": 1.3,
+    "SpecMode": 1.0,
+    "SpecSoftness": 0.02,
+    "SpecThreshold": 0.62,
+    "UseAlbedoMap": 0,
+    "UseMatCap": 1,
+    "UseOutlineNoise": 0
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
+}

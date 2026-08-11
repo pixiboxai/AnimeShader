@@ -1,0 +1,66 @@
+{
+  "description": "Polished silver: neutral cool body, very tight bright highlight, strong rim.",
+  "name": "metal_silver",
+  "parameters": {
+    "AOAffectsAmbient": 1.0,
+    "AOAffectsBand": 1.0,
+    "AlbedoIsSRGB": 0,
+    "AmbientColor": [
+      0.07,
+      0.075,
+      0.09
+    ],
+    "BaseColor": [
+      0.42,
+      0.44,
+      0.48
+    ],
+    "FillLightScale": 0.2,
+    "HalfLambert": 0.0,
+    "MatCapIntensity": 1.05,
+    "MatCapMap": "<project>/textures/matcap_silver.png",
+    "OutlineColor": [
+      0.06,
+      0.07,
+      0.09
+    ],
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.35,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.1,
+    "OutlineZOffset": 2.0,
+    "RimAlbedoTint": 0.25,
+    "RimColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "RimFollowLight": 0.3,
+    "RimIntensity": 1.05,
+    "RimPower": 4.5,
+    "RimUpMask": 0.3,
+    "ShadowColor": [
+      0.2,
+      0.22,
+      0.28
+    ],
+    "ShadowSoftness": 0.015,
+    "ShadowThreshold": 0.5,
+    "SpecColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "SpecGloss": 120.0,
+    "SpecIntensity": 1.5,
+    "SpecMode": 1.0,
+    "SpecSoftness": 0.015,
+    "SpecThreshold": 0.66,
+    "UseAlbedoMap": 0,
+    "UseMatCap": 1,
+    "UseOutlineNoise": 0
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
+}

@@ -14,3 +14,7 @@ test_*.png
 reference/
 docs/
 Sample/
+_probe/
+metal.txt
+lucy_*.txt
+probe.txt

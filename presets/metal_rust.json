@@ -1,0 +1,70 @@
+{
+  "description": "Rusted iron: tileable corrosion albedo, rough broad highlight, soft dark terminator, broken-up outline.",
+  "name": "metal_rust",
+  "parameters": {
+    "AOAffectsAmbient": 1.0,
+    "AOAffectsBand": 1.0,
+    "AlbedoIsSRGB": 1,
+    "AlbedoMap": "<project>/textures/rust_albedo.png",
+    "AmbientColor": [
+      0.12,
+      0.1,
+      0.09
+    ],
+    "BaseColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "FillLightScale": 0.4,
+    "HalfLambert": 0.3,
+    "MatCapIntensity": 0.55,
+    "MatCapMap": "<project>/textures/matcap_rust.png",
+    "OutlineColor": [
+      0.09,
+      0.05,
+      0.03
+    ],
+    "OutlineNoiseCutoff": 0.35,
+    "OutlineNoiseScale": 6.0,
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.55,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.1,
+    "OutlineWidthVariation": 0.4,
+    "OutlineZOffset": 2.0,
+    "RimAlbedoTint": 0.7,
+    "RimColor": [
+      0.75,
+      0.62,
+      0.52
+    ],
+    "RimFollowLight": 0.2,
+    "RimIntensity": 0.35,
+    "RimPower": 2.5,
+    "RimUpMask": 0.6,
+    "ShadowColor": [
+      0.3,
+      0.24,
+      0.2
+    ],
+    "ShadowSoftness": 0.1,
+    "ShadowThreshold": 0.44,
+    "SpecColor": [
+      0.55,
+      0.44,
+      0.36
+    ],
+    "SpecGloss": 6.0,
+    "SpecIntensity": 0.3,
+    "SpecMode": 1.0,
+    "SpecSoftness": 0.3,
+    "SpecThreshold": 0.35,
+    "UseAlbedoMap": 1,
+    "UseMatCap": 1,
+    "UseOutlineNoise": 1
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
+}
