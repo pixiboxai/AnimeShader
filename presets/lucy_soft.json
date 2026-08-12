@@ -1,0 +1,161 @@
+{
+  "description": "Soft-shaded anime look tuned on the GGS Lucy sample: gradient band, baked vertex AO, low ambient for a gamma-space (colour-management-off) scene.",
+  "name": "lucy_soft",
+  "parameters": {
+    "AOAffectsAmbient": 1.0,
+    "AOAffectsBand": 0.3499999940395355,
+    "AOChannel": 0.0,
+    "AOStrength": 1.0,
+    "AlbedoIsSRGB": false,
+    "AlphaCutoff": 0.5,
+    "AmbientColor": [
+      0.05999999865889549,
+      0.07000000029802322,
+      0.09000000357627869
+    ],
+    "AnisoBias": 0.0,
+    "AnisoExponent": 40.0,
+    "AnisoShiftIntensity": 0.30000001192092896,
+    "BaseColor": [
+      0.8999999761581421,
+      0.8999999761581421,
+      0.8999999761581421
+    ],
+    "EmissionColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "EmissionFromAlbedoAlpha": false,
+    "EmissionIntensity": 1.0,
+    "FaceRimColor": [
+      1.0,
+      0.949999988079071,
+      0.9200000166893005
+    ],
+    "FaceRimIntensity": 6.0,
+    "FaceSDFSoftness": 0.019999999552965164,
+    "FillLightScale": 0.05999999865889549,
+    "HalfLambert": 1.0,
+    "HeadForward": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "HeadRight": [
+      1.0,
+      0.0,
+      0.0
+    ],
+    "ILMAoStrength": 0.0,
+    "ILMBiasUseVertexColor": false,
+    "ILMShadowBias": 0.30000001192092896,
+    "InteriorLineColor": [
+      0.07999999821186066,
+      0.05000000074505806,
+      0.07000000029802322
+    ],
+    "InteriorLineInvert": false,
+    "InteriorLineOpacity": 0.44999998807907104,
+    "InteriorLineSoftness": 0.05000000074505806,
+    "InteriorLineThreshold": 0.5,
+    "KeyLightIndex": 0.0,
+    "LightDirOverride": [
+      -0.4000000059604645,
+      0.6000000238418579,
+      0.699999988079071
+    ],
+    "MatCapIntensity": 1.0,
+    "NormalDiffuseAmount": 0.25,
+    "NormalFlipGreen": false,
+    "NormalMapSpace": 0.0,
+    "NormalStrength": 1.0,
+    "OutlineColor": [
+      0.05000000074505806,
+      0.029999999329447746,
+      0.05000000074505806
+    ],
+    "OutlineDistanceFade": 0.0,
+    "OutlineMaskChannel": 0.0,
+    "OutlineMaskInvert": false,
+    "OutlineMaskThreshold": 0.5,
+    "OutlineNoiseCutoff": 0.3499999940395355,
+    "OutlineNoiseScale": 1.0,
+    "OutlineScreenSpace": true,
+    "OutlineTintAmount": 0.6000000238418579,
+    "OutlineTintFromAlbedo": true,
+    "OutlineUseSmoothNormal": true,
+    "OutlineUseVertexColor": true,
+    "OutlineWidth": 0.36000001430511475,
+    "OutlineWidthVariation": 0.0,
+    "OutlineZOffset": 2.0,
+    "RampRowIndex": 0.0,
+    "RampRows": 1.0,
+    "RimAlbedoTint": 0.6000000238418579,
+    "RimColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "RimFollowLight": 0.6000000238418579,
+    "RimIntensity": 0.18000000715255737,
+    "RimMaskChannel": 0.0,
+    "RimMaskInvert": false,
+    "RimPower": 3.5,
+    "RimSoftness": 0.07999999821186066,
+    "RimThreshold": 0.3499999940395355,
+    "RimUpMask": 0.5,
+    "SSSStrength": 1.0,
+    "ShadeNormalAmount": 1.0,
+    "ShadowColor": [
+      0.550000011920929,
+      0.5,
+      0.6600000262260437
+    ],
+    "ShadowColorMode": 1.0,
+    "ShadowSoftness": 0.25,
+    "ShadowThreshold": 0.41999998688697815,
+    "SpecColor": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "SpecColorMapAmount": 1.0,
+    "SpecGloss": 60.0,
+    "SpecIntensity": 0.800000011920929,
+    "SpecMaskChannel": 0.0,
+    "SpecMaskInvert": false,
+    "SpecMode": 1.0,
+    "SpecRampWidth": 0.5,
+    "SpecSoftness": 0.009999999776482582,
+    "SpecThreshold": 0.550000011920929,
+    "UseAOMap": false,
+    "UseAlbedoMap": true,
+    "UseAlphaClip": false,
+    "UseEmissionMap": false,
+    "UseFaceRim": false,
+    "UseFaceSDF": false,
+    "UseHairMask": false,
+    "UseInteriorLines": true,
+    "UseLightMap": true,
+    "UseLightOverride": false,
+    "UseMatCap": false,
+    "UseMatIDForRamp": false,
+    "UseNormalMap": false,
+    "UseOutlineMask": false,
+    "UseOutlineNoise": false,
+    "UseRampMap": false,
+    "UseRimMask": false,
+    "UseSSSMap": true,
+    "UseShadeNormal": false,
+    "UseSpecColorMap": false,
+    "UseSpecMask": false,
+    "UseVertexAO": true,
+    "gScreen": [
+      0.0,
+      0.0
+    ]
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
+}

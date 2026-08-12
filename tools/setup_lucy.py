@@ -14,11 +14,14 @@ measured on LUC_ilm.png rather than assumed:
     B  specular size          near 0 -- tight highlights
     A  interior lines         only 2 distinct values, i.e. a binary mask
 
-The scene has colour management switched off, so Maya's file nodes hand the
-shader sRGB-encoded values untouched. AlbedoIsSRGB therefore has to be ON here
-and the file nodes pinned to Raw, otherwise the maps come out washed out. That
-is a property of the scene, not of the textures -- check it before copying
-these settings elsewhere.
+Colour management is switched off in this scene, which cuts both ends of the
+pipe: the file node hands over sRGB-encoded values untouched, AND the viewport
+shows the shader's output raw, with no display transform. So de-gamma'ing the
+albedo without re-encoding on the way out just makes everything dark -- the
+bodysuit read near-black instead of violet. AlbedoIsSRGB stays OFF here.
+
+Turn it ON only where the viewport does apply a display transform. That is a
+property of the scene, not of the textures.
 """
 
 import os
@@ -149,7 +152,10 @@ def run(base_preset=BASE_PRESET, log_path=os.path.join(PROJECT, "lucy_setup.txt"
 
         skipped = gshader.set_params(node, {
             "UseAlbedoMap": 1,
-            "AlbedoIsSRGB": 1,          # colour management is off in this scene
+            # Off: with colour management disabled the viewport applies no
+            # display transform either, so the shader must hand back values in
+            # the same encoding the texture arrived in.
+            "AlbedoIsSRGB": 0,
             "UseLightMap": 1,           # ILM: spec / shadow / size / lines
 
             # ILM green is NOT occlusion. GGXrd paints the terminator position
@@ -210,7 +216,7 @@ def run(base_preset=BASE_PRESET, log_path=os.path.join(PROJECT, "lucy_setup.txt"
                             colour_space="Raw")
         gshader.set_params(node, {
             "UseAlbedoMap": 1,
-            "AlbedoIsSRGB": 1,
+            "AlbedoIsSRGB": 0,
             "UseAlphaClip": 1,
             "AlphaCutoff": 0.30,
             "UseLightMap": 0,
