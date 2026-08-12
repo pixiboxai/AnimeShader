@@ -1,0 +1,63 @@
+{
+  "description": "Anime skin via a subsurface ramp: the shadow turns warm instead of just darkening, with a red bloom at the terminator. Broad soft sheen, warm rim, reddish outline. RampRowIndex picks the tone: 0 neutral, 1 warm, 2 pale, 3 tan. Set BaseColor to white if the mesh already has a skin albedo map.",
+  "name": "skin_anime",
+  "parameters": {
+    "AOAffectsAmbient": 1.0,
+    "AOAffectsBand": 0.35,
+    "AlbedoIsSRGB": 0,
+    "AmbientColor": [
+      0.07,
+      0.06,
+      0.06
+    ],
+    "BaseColor": [
+      0.86,
+      0.71,
+      0.63
+    ],
+    "FillLightScale": 0.22,
+    "HalfLambert": 0.45,
+    "NormalDiffuseAmount": 0.5,
+    "OutlineColor": [
+      0.2,
+      0.08,
+      0.07
+    ],
+    "OutlineScreenSpace": 1,
+    "OutlineTintAmount": 0.55,
+    "OutlineTintFromAlbedo": 1,
+    "OutlineUseSmoothNormal": 1,
+    "OutlineWidth": 0.6,
+    "OutlineZOffset": 2.0,
+    "RampMap": "<project>/textures/skin_ramp.png",
+    "RampRowIndex": 0.0,
+    "RampRows": 4.0,
+    "RimAlbedoTint": 0.7,
+    "RimColor": [
+      1.0,
+      0.78,
+      0.68
+    ],
+    "RimFollowLight": 0.3,
+    "RimIntensity": 0.35,
+    "RimPower": 3.0,
+    "RimUpMask": 0.35,
+    "ShadowColorMode": 0.0,
+    "SpecColor": [
+      1.0,
+      0.94,
+      0.9
+    ],
+    "SpecGloss": 14.0,
+    "SpecIntensity": 0.12,
+    "SpecMode": 1.0,
+    "SpecSoftness": 0.15,
+    "SpecThreshold": 0.55,
+    "UseOutlineNoise": 0,
+    "UseRampMap": 1,
+    "UseSSSMap": 0,
+    "UseVertexAO": 1
+  },
+  "shader": "GNTAnime.ogsfx",
+  "technique": "AnimeOutline"
+}
