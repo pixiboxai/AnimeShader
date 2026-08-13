@@ -158,55 +158,117 @@ def rasterise(mesh, values, size, uv_set):
 
 
 def dilate(field, filled, size, rounds=4):
-    """Bleed the field outwards so UV seams do not sample empty space."""
+    """Bleed the field outwards so UV seams do not sample empty space.
+
+    Only the frontier is visited each round, not the whole image. Scanning
+    everything costs the same on round twenty as on round one, which at 2K is
+    four million pixels of mostly-decided territory per pass.
+    """
+    frontier = set()
+    for y in range(size):
+        row = y * size
+        for x in range(size):
+            if filled[row + x]:
+                continue
+            for dy, dx in ((-1, 0), (1, 0), (0, -1), (0, 1),
+                           (-1, -1), (-1, 1), (1, -1), (1, 1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= nx < size and 0 <= ny < size and filled[ny * size + nx]:
+                    frontier.add(row + x)
+                    break
+
     for _ in range(rounds):
+        if not frontier:
+            break
         additions = []
-        for y in range(size):
-            for x in range(size):
-                i = y * size + x
-                if filled[i]:
-                    continue
-                total = 0.0
-                count = 0
-                for dy in (-1, 0, 1):
-                    for dx in (-1, 0, 1):
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < size and 0 <= ny < size:
-                            j = ny * size + nx
-                            if filled[j]:
-                                total += field[j]
-                                count += 1
-                if count:
-                    additions.append((i, total / count))
+        for i in frontier:
+            y, x = divmod(i, size)
+            total = 0.0
+            count = 0
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < size and 0 <= ny < size:
+                        j = ny * size + nx
+                        if filled[j]:
+                            total += field[j]
+                            count += 1
+            if count:
+                additions.append((i, total / count))
         if not additions:
             break
         for i, v in additions:
             field[i] = v
             filled[i] = 1
+        nxt = set()
+        for i, _v in additions:
+            y, x = divmod(i, size)
+            for dy in (-1, 0, 1):
+                for dx in (-1, 0, 1):
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < size and 0 <= ny < size:
+                        j = ny * size + nx
+                        if not filled[j]:
+                            nxt.add(j)
+        frontier = nxt
     return field
 
 
 def blur(field, size, radius=1):
-    """A light box blur: the SDF is meant to be smooth, and rasterising
-    per-vertex values leaves faceting along the triangle edges."""
-    out = list(field)
+    """Box blur, run separably: rows then columns.
+
+    A square kernel costs (2r+1)^2 samples per pixel; two 1D passes cost
+    2*(2r+1) for the same result. At 2K with radius 4 that is 18 samples
+    instead of 81, which is the difference between usable and not.
+    """
+    if radius < 1:
+        return list(field)
+    window = 2 * radius + 1
+
+    tmp = [0.0] * (size * size)
     for y in range(size):
+        row = y * size
         for x in range(size):
             total = 0.0
             count = 0
+            for dx in range(-radius, radius + 1):
+                nx = x + dx
+                if 0 <= nx < size:
+                    total += field[row + nx]
+                    count += 1
+            tmp[row + x] = total / count
+
+    out = [0.0] * (size * size)
+    for x in range(size):
+        for y in range(size):
+            total = 0.0
+            count = 0
             for dy in range(-radius, radius + 1):
-                for dx in range(-radius, radius + 1):
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < size and 0 <= ny < size:
-                        total += field[ny * size + nx]
-                        count += 1
+                ny = y + dy
+                if 0 <= ny < size:
+                    total += tmp[ny * size + x]
+                    count += 1
             out[y * size + x] = total / count
     return out
 
 
-def bake(mesh="Head", output=None, size=512, steps=60, uv_set=None,
-         forward=None, right=None, blur_radius=1):
-    """Bake and write the SDF. Returns a dict of what happened."""
+def bake(mesh="Head", output=None, size=512, steps=None, uv_set=None,
+         forward=None, right=None, blur_radius=None, dilate_rounds=None):
+    """Bake and write the SDF. Returns a dict of what happened.
+
+    ``steps``, ``blur_radius`` and ``dilate_rounds`` default to values scaled
+    off ``size``. They are not free parameters: a bleed of four pixels covers
+    the same seam at 512 that sixteen covers at 2K, and a blur that softens
+    triangle faceting at one resolution does nothing at four times the density.
+    Leaving them to scale keeps a 2K bake looking like the 512 one, only finer.
+    """
+    scale = size / 512.0
+    if steps is None:
+        steps = int(60 * max(1.0, scale ** 0.5))    # finer angular quantisation
+    if blur_radius is None:
+        blur_radius = max(1, int(round(scale)))
+    if dilate_rounds is None:
+        dilate_rounds = max(4, int(round(4 * scale)))
     uv_set = uv_set or (cmds.polyUVSet(mesh, q=True, currentUVSet=True)
                         or ["map1"])[0]
     forward = forward or (0.0, 0.0, 1.0)
@@ -215,7 +277,7 @@ def bake(mesh="Head", output=None, size=512, steps=60, uv_set=None,
     values = sweep(mesh, forward, right, steps=steps)
     field, filled = rasterise(mesh, values, size, uv_set)
     covered = sum(filled)
-    field = dilate(field, filled, size)
+    field = dilate(field, filled, size, rounds=dilate_rounds)
     if blur_radius:
         field = blur(field, size, blur_radius)
 
@@ -230,6 +292,7 @@ def bake(mesh="Head", output=None, size=512, steps=60, uv_set=None,
     n = len(ordered)
     return {"output": output, "size": size, "uv_set": uv_set,
             "vertices": n, "steps": steps,
+            "blur_radius": blur_radius, "dilate_rounds": dilate_rounds,
             "coverage": covered / float(size * size),
             "p10": ordered[n // 10], "p50": ordered[n // 2],
             "p90": ordered[9 * n // 10],
