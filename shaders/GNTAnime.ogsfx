@@ -377,13 +377,24 @@ uniform bool UseMatIDForRamp <
     int    UIOrder = 402;
 > = false;
 
+// Green is a *threshold* map on every Arc System Works ILM: 0.5 means "put the
+// terminator wherever the light puts it", brighter means "stay lit", darker
+// means "stay in shadow". It is not occlusion, and multiplying it into AO is
+// the single easiest mistake to make with this shader -- it was made twice on
+// this project, on two different characters, and both times it darkened the
+// whole model by about a third (the neutral value being 0.5) while throwing
+// away every shadow shape the artist had painted.
+//
+// So the default is off, ILMShadowBias below is on, and if the bias is doing
+// its job this one is ignored outright. Turn it up only for a map you know was
+// authored with occlusion in green.
 uniform float ILMAoStrength <
-    string UIName   = "ILM AO Strength";
+    string UIName   = "ILM G as Occlusion (not the usual meaning)";
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
     string UIGroup  = "4 - ILM Mask";
     int    UIOrder  = 403;
-> = 1.0;
+> = 0.0;
 
 uniform bool UseVertexAO <
     string UIName  = "AO From Vertex Color G";
@@ -391,16 +402,15 @@ uniform bool UseVertexAO <
     int    UIOrder = 404;
 > = false;
 
-// Arc System Works (Guilty Gear Xrd) treat the ILM green channel as a painted
-// *shadow threshold* rather than an AO multiply: the artist decides where the
-// terminator sits per pixel, modulated by vertex colour red. Blend towards it.
+// The artist decides where the terminator sits, per pixel, modulated by vertex
+// colour red. This is what ILM green is for, so it leads.
 uniform float ILMShadowBias <
     string UIName   = "ILM G Drives Shadow Threshold";
     string UIWidget = "Slider";
     float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
     string UIGroup  = "4 - ILM Mask";
     int    UIOrder  = 405;
-> = 0.0;
+> = 1.0;
 
 uniform bool ILMBiasUseVertexColor <
     string UIName  = "Threshold x Vertex Color R";
@@ -1430,8 +1440,14 @@ GLSLShader PS_Main
         float specSize   = UseLightMap ? ilm.b : 0.5;
         float matID      = UseLightMap ? ilm.a : 0.0;
 
+        // Green cannot be both "where the terminator sits" and "how occluded
+        // this is". Whichever reading is active, the other is off: the bias
+        // below leads, so it silences the occlusion reading rather than the
+        // two quietly compounding into a model that is uniformly too dark.
+        float aoFromILM = (ILMShadowBias > 0.0) ? 0.0 : ILMAoStrength;
+
         float ao = 1.0;
-        if (UseLightMap) ao *= mix(1.0, ilm.g, ILMAoStrength);
+        if (UseLightMap) ao *= mix(1.0, ilm.g, aoFromILM);
         if (UseVertexAO) ao *= PS_IN.vcol.g;
         if (UseAOMap) {
             float m = pickChannel(texture(AOSampler, flipUV(uv)), AOChannel);
@@ -1495,8 +1511,23 @@ GLSLShader PS_Main
         // Normal Edit replaces the band normal outright -- that is the whole
         // idea. Everything else on this pixel still uses N.
         if (UseShadeNormal) {
-            Nband = normalize(mix(Nband, normalize(PS_IN.wShadeNormal),
-                                  ShadeNormalAmount));
+            // A Normal Edit field that arrives pointing past a right angle
+            // from the real normal does not soften the shadow, it lights the
+            // opposite side.
+            //
+            // The bake reports its own worst deviation and warns above 90, but
+            // that measurement and this one do not see the same thing: the
+            // bake compares against face-vertex normals, which on a mesh with
+            // flipped faces read wildly (166 degrees on this character's hair)
+            // while the vertex-level field is fine (74). What survives to here
+            // is whatever the tangent-space round trip produced, and a corrupt
+            // basis can invert a value that was correct when written. So the
+            // check belongs at the point of use, per pixel, not only at bake
+            // time -- refuse the field where it has turned away, keep it
+            // everywhere else.
+            vec3 sn = normalize(PS_IN.wShadeNormal);
+            if (dot(sn, Ngeom) > 0.0)
+                Nband = normalize(mix(Nband, sn, ShadeNormalAmount));
         }
 
         //---- key light ----------------------------------------------------
