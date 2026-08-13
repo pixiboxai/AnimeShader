@@ -30,8 +30,14 @@ whole thing:
     t = atan2(Nf, -Nr), exactly, at any angle. No steps, so nothing to blend
     away, and no quantisation left to filter out.
 
-  * occlusion -- the nose casting onto the cheek, which no analytic form gives
-    -- is swept with rays, and takes the earlier of the two angles.
+  * occlusion -- the nose casting onto the cheek -- can be swept with rays and
+    take the earlier of the two angles, but it is OFF by default. On a real
+    head the eye sockets and the inside of the mouth shadow themselves long
+    before the nose shadows anything, and they stamp hard black shapes across
+    the map that drown out the features the shadow is supposed to read by.
+    Measured on Hiro: 24% of face texels were changed by it, and the nose and
+    cheek were harder to make out with it than without. The reference pipeline
+    builds its masks from N-dot-L alone for the same reason.
 
 Geometry is rasterised into UV space as position and normal maps first, so both
 terms are evaluated per texel. The earlier version of this file interpolated a
@@ -193,7 +199,7 @@ def analytic_threshold(nrm, filled, forward, right):
 
 
 def occlusion_threshold(mesh, pos, nrm, filled, forward, right, size,
-                        steps=32, bias=0.05):
+                        steps=32, bias=0.05, reach=None):
     """Angle at which something else gets in the way, per texel.
 
     No closed form for this one -- it depends on the whole head -- so it is
@@ -204,7 +210,8 @@ def occlusion_threshold(mesh, pos, nrm, filled, forward, right, size,
     fn = om.MFnMesh(dag)
     accel = fn.autoUniformGridParams()
     box = fn.boundingBox
-    reach = (box.width + box.height + box.depth) * 0.6
+    if reach is None:
+        reach = (box.width + box.height + box.depth) * 0.6
 
     F = om.MVector(*forward).normal()
     R = om.MVector(*right).normal()
@@ -336,14 +343,24 @@ def blur(field, size, radius=1):
 # --------------------------------------------------------------------------
 
 def bake(mesh="Head", output=None, size=2048, uv_set=None, forward=None,
-         right=None, occlusion_steps=32, occlusion_size=None,
-         blur_radius=None, dilate_rounds=None, bitdepth=8):
+         right=None, occlusion_steps=0, occlusion_size=None,
+         occlusion_reach=None, blur_radius=None, dilate_rounds=None,
+         bitdepth=8):
     """Bake and write the threshold map. Returns a dict of what happened.
 
     ``occlusion_size`` renders the cast-shadow term at a lower resolution and
     upsamples it: a ray per texel per angle at 2K is tens of millions of casts,
     and cast shadow edges are soft anyway. The N-dot-L term, which carries the
-    crisp boundary, always runs at full resolution.
+    crisp boundary, always runs at full resolution. Measured on Hiro, raising it
+    from 1024 to the full 2048 changed nothing beyond 0.5% and cost four times
+    the wall clock -- it saturates early.
+
+    ``occlusion_reach`` is the one that matters for how the map reads. Left
+    open, a ray runs the length of the whole head, so the eye sockets and the
+    inside of the mouth shadow themselves and stamp hard black shapes across
+    the map that have nothing to do with the face shadow. Cut it to a few
+    centimetres and only what is genuinely nearby -- the nose onto the cheek,
+    the brow onto the eyelid -- still casts.
     """
     uv_set = uv_set or (cmds.polyUVSet(mesh, q=True, currentUVSet=True)
                         or ["map1"])[0]
@@ -362,9 +379,13 @@ def bake(mesh="Head", output=None, size=2048, uv_set=None, forward=None,
     field = analytic_threshold(nrm, filled, forward, right)
 
     # cast shadows, at their own resolution, then upsampled
-    if occlusion_size == size:
+    tested = 0
+    if not occlusion_steps:
+        pass
+    elif occlusion_size == size:
         occ, tested = occlusion_threshold(mesh, pos, nrm, filled, forward,
-                                          right, size, steps=occlusion_steps)
+                                          right, size, steps=occlusion_steps,
+                                          reach=occlusion_reach)
         for i in range(len(field)):
             if filled[i] and occ[i] < field[i]:
                 field[i] = occ[i]
@@ -372,7 +393,8 @@ def bake(mesh="Head", output=None, size=2048, uv_set=None, forward=None,
         opos, onrm, ofilled = rasterise_attributes(mesh, occlusion_size, uv_set)
         occ, tested = occlusion_threshold(mesh, opos, onrm, ofilled, forward,
                                           right, occlusion_size,
-                                          steps=occlusion_steps)
+                                          steps=occlusion_steps,
+                                          reach=occlusion_reach)
         ratio = occlusion_size / float(size)
         for y in range(size):
             oy = min(occlusion_size - 1, int(y * ratio))
@@ -414,6 +436,7 @@ def bake(mesh="Head", output=None, size=2048, uv_set=None, forward=None,
             "texels_covered": covered,
             "coverage": covered / float(size * size),
             "occlusion_size": occlusion_size,
+            "occlusion_reach": occlusion_reach,
             "occlusion_steps": occlusion_steps,
             "occlusion_texels_tested": tested,
             "blur_radius": blur_radius, "dilate_rounds": dilate_rounds,
