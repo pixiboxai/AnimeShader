@@ -792,6 +792,26 @@ uniform float FaceSDFSoftness <
     int    UIOrder  = 708;
 > = 0.02;
 
+// The map is baked for the light on one side only; the other side reads it
+// mirrored. That only works if the two halves of the face sit symmetrically
+// in UV, which is worth checking rather than assuming -- on Hiro 82% of
+// mirrored vertex pairs matched about u = 0.5, but a head laid out with the
+// halves side by side instead of overlapping needs a different pivot, and one
+// unwrapped asymmetrically needs the mirror off and a full bake.
+uniform bool FaceSDFMirror <
+    string UIName  = "Face SDF Mirror U";
+    string UIGroup = "7 - Face";
+    int    UIOrder = 709;
+> = true;
+
+uniform float FaceSDFMirrorPivot <
+    string UIName   = "Face SDF Mirror Pivot";
+    string UIWidget = "Slider";
+    float  UIMin = 0.0; float UIMax = 1.0; float UIStep = 0.01;
+    string UIGroup  = "7 - Face";
+    int    UIOrder  = 710;
+> = 0.5;
+
 
 //-----------------------------------------------------------------------------
 //  Rim light  (GBFR: fresnel masked by up-facing)
@@ -1543,7 +1563,9 @@ GLSLShader PS_Main
             float FdotL = dot(F, Lh);
             float RdotL = dot(R, Lh);
 
-            vec2 sdfUV = (RdotL > 0.0) ? uv : vec2(1.0 - uv.x, uv.y);
+            vec2 sdfUV = uv;
+            if (FaceSDFMirror && RdotL < 0.0)
+                sdfUV.x = 2.0 * FaceSDFMirrorPivot - uv.x;
             float sdf  = texture(FaceSDFSampler, flipUV(sdfUV)).r;
 
             float threshold = (1.0 - FdotL) * 0.5;
@@ -1561,8 +1583,27 @@ GLSLShader PS_Main
         // map that dark is a finished colour, not a tint -- multiplying it
         // drops the shadow to 45% and pushes R/G from 1.22 to 1.70, which
         // reads as a muddy red rather than skin in shade.
+        //
+        // The ramp gets its own branch because it used to fall into the first
+        // one and lose its colour: with a shadow map loaded and Replace
+        // selected, celDiffuse's ramp colour was computed and then thrown
+        // away. Something still changed on screen -- bandFactor switches from
+        // a stepped band to a linear lit, so the falloff shifted -- which made
+        // it look like the ramp was working while none of its colours ever
+        // reached the pixel. That is the worst kind of wrong: loading a warm
+        // skin ramp visibly did *something*, just never what it said.
+        //
+        // Where both are on, the ramp shapes the falloff and the map tints its
+        // dark end, which is the combination that makes sense on skin: the
+        // ramp says how the light dies away, the map says what colour the
+        // flesh goes while it does.
         vec3 diffuse;
-        if (ShadowColorMode > 0.5 && UseSSSMap) {
+        if (UseRampMap) {
+            vec3 tint = mix(vec3(1.0), shadowTint,
+                            (1.0 - bandFactor) * sat(ShadowColorMode)
+                            * float(UseSSSMap));
+            diffuse = albedo * band * tint * keyRadiance;
+        } else if (ShadowColorMode > 0.5 && UseSSSMap) {
             diffuse = mix(shadowTint, albedo, bandFactor) * keyRadiance;
         } else {
             diffuse = albedo * band * keyRadiance;
