@@ -1590,20 +1590,36 @@ GLSLShader PS_Main
             vec3 R = normalize(HeadRight);
             vec3 U = normalize(cross(F, R));
 
-            vec3  Lh    = normalize(L - dot(L, U) * U);   // light on the head's horizontal plane
-            float FdotL = dot(F, Lh);
-            float RdotL = dot(R, Lh);
+            // The map is indexed by where the light sits *around* the head, so
+            // it needs the light flattened onto the horizontal plane. Directly
+            // overhead there is no such direction: the projection collapses to
+            // the zero vector and normalising it yields garbage the shader then
+            // reads with total confidence. Measure how much horizontal
+            // direction is actually left and fade back to the ordinary band as
+            // it runs out -- which is also the honest answer, because a face
+            // SDF baked for a light swinging round the head says nothing about
+            // one hanging above it.
+            vec3  flatL = L - dot(L, U) * U;
+            float horiz = length(flatL);
+            float sdfWeight = smoothstep(0.15, 0.45, horiz);
 
-            vec2 sdfUV = uv;
-            if (FaceSDFMirror && RdotL < 0.0)
-                sdfUV.x = 2.0 * FaceSDFMirrorPivot - uv.x;
-            float sdf  = texture(FaceSDFSampler, flipUV(sdfUV)).r;
+            if (sdfWeight > 0.0) {
+                vec3  Lh    = flatL / max(horiz, 1e-5);
+                float FdotL = dot(F, Lh);
+                float RdotL = dot(R, Lh);
 
-            float threshold = (1.0 - FdotL) * 0.5;
-            float faceLit   = smoothstep(threshold - FaceSDFSoftness,
-                                         threshold + FaceSDFSoftness, sdf);
-            band = mix(shadowTint, vec3(1.0), faceLit);
-            bandFactor = faceLit;
+                vec2 sdfUV = uv;
+                if (FaceSDFMirror && RdotL < 0.0)
+                    sdfUV.x = 2.0 * FaceSDFMirrorPivot - uv.x;
+                float sdf  = texture(FaceSDFSampler, flipUV(sdfUV)).r;
+
+                float threshold = (1.0 - FdotL) * 0.5;
+                float faceLit   = smoothstep(threshold - FaceSDFSoftness,
+                                             threshold + FaceSDFSoftness, sdf);
+                band       = mix(band, mix(shadowTint, vec3(1.0), faceLit),
+                                 sdfWeight);
+                bandFactor = mix(bandFactor, faceLit, sdfWeight);
+            }
         }
 
         // Two ways to spend a shadow colour map, and which one is right

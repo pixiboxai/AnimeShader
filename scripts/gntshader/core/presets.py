@@ -117,7 +117,37 @@ def apply(node, preset, skip_textures=False):
             "GNTShader: {0} preset value(s) skipped: {1}".format(
                 len(skipped), ", ".join(sorted(skipped)))
         )
+    _warn_ilm_green(preset.get("name", "?"), params)
     return skipped
+
+
+def _warn_ilm_green(name, params):
+    """Say so when a preset reads ILM green as occlusion.
+
+    The shader's defaults were changed to treat green as the painted terminator
+    position, which is what it is on an Arc System Works map. A preset captured
+    before that carries the old wiring and puts it straight back -- silently,
+    because every value in it applies cleanly. The neutral value of that channel
+    is 0.5, so the result is a model uniformly about a third too dark with every
+    authored shadow shape discarded, which is easy to mistake for a lighting
+    problem and hard to trace to a preset.
+
+    This is only a warning: an old capture is someone's saved look, and quietly
+    rewriting it would be worse than telling them.
+    """
+    if not params.get("UseLightMap"):
+        return
+    ao = params.get("ILMAoStrength") or 0.0
+    bias = params.get("ILMShadowBias") or 0.0
+    if ao > 0.01 and bias <= 0.01:
+        cmds.warning(
+            "GNTShader: preset '{0}' sets ILMAoStrength={1:.2f} with "
+            "ILMShadowBias=0, i.e. it reads ILM green as occlusion. On an "
+            "ArcSys map green is the painted terminator position; the neutral "
+            "value 0.5 then darkens everything by roughly a third. Set "
+            "ILMShadowBias=1 and ILMAoStrength=0 unless the map really was "
+            "authored with occlusion in green.".format(name, ao)
+        )
 
 
 def capture(node, name, description="", directory=None, include_textures=False):
