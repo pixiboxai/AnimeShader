@@ -374,11 +374,17 @@ def transferred_normal_field(mesh, source):
             for v in out]
 
 
-def bake_shade_normals(mesh, source=None, iterations=12, keep=0.25, uv_set=None):
+def bake_shade_normals(mesh, source=None, iterations=3, keep=0.6, uv_set=None):
     """Bake the Normal Edit field into its own UV set.
 
     With ``source``, copies normals off that mesh. Without one, smooths the
     mesh's own normals into the same kind of large-shape field.
+
+    The defaults are deliberately gentle. Smoothing harder gives flatter, more
+    graphic shadows, but the field can drift past 90 degrees from the real
+    normals, at which point the cel band lights the wrong side of the mesh --
+    which is what happened to Hiro's head at the old iterations=12, keep=0.25.
+    Watch ``max_deviation_deg`` in the returned dict.
 
     Nothing on the mesh is overwritten -- the real normals stay put, and the
     shader decides how far to lean on this for the cel band.
@@ -394,6 +400,17 @@ def bake_shade_normals(mesh, source=None, iterations=12, keep=0.25, uv_set=None)
     existing = cmds.polyUVSet(target_node, query=True, allUVSets=True) or []
     if uv_set not in existing:
         cmds.polyUVSet(target_node, create=True, uvSet=uv_set)
+
+    # The field is encoded against the tangent basis, and Maya derives tangents
+    # from whichever UV set happens to be current. Baking twice in a row left
+    # GNT_shadeNormal current the second time and getTangents raised
+    # "No element at given index"; worse, a silent mismatch here would encode
+    # against one basis and decode against another. Pin it, and put it back.
+    previous_uv = (cmds.polyUVSet(target_node, query=True, currentUVSet=True)
+                   or [None])[0]
+    tangent_set = existing[0] if existing else None
+    if tangent_set:
+        cmds.polyUVSet(target_node, currentUVSet=True, uvSet=tangent_set)
 
     dag = _dag_path(mesh)
     fn = om.MFnMesh(dag)
@@ -430,9 +447,28 @@ def bake_shade_normals(mesh, source=None, iterations=12, keep=0.25, uv_set=None)
     fn.setUVs(us, vs, uv_set)
     fn.assignUVs(counts, om.MIntArray(range(len(us))), uv_set)
 
+    if previous_uv and tangent_set and previous_uv != tangent_set:
+        try:
+            cmds.polyUVSet(target_node, currentUVSet=True, uvSet=previous_uv)
+        except RuntimeError:
+            pass
+
+    # Past 90 degrees the field points away from the surface it belongs to, and
+    # the cel band lights the wrong side. A head hits this long before a torso
+    # does: it is a compact rounded form, so repeated averaging collapses it,
+    # while a long shape survives the same treatment. Measured on Hiro: the head
+    # reached 96.6 degrees at the old default and lit from the opposite side to
+    # the body; at iterations=2, keep=0.75 it came back to 60.7 and agreed.
+    if deviation > 90.0:
+        cmds.warning(
+            "GNTShader: {0} normal field strays {1:.1f} deg from the real "
+            "normals -- past 90 the shading inverts. Raise 'keep' or lower "
+            "'iterations'.".format(_transform_of(mesh), deviation))
+
     return {"uv_set": uv_set,
             "source": source or "(smoothed in place)",
             "max_deviation_deg": deviation,
+            "inverts": deviation > 90.0,
             "vertices": len(field)}
 
 
