@@ -150,11 +150,7 @@
     "UseShadeNormal": false,
     "UseSpecColorMap": false,
     "UseSpecMask": false,
-    "UseVertexAO": true,
-    "gScreen": [
-      0.0,
-      0.0
-    ]
+    "UseVertexAO": true
   },
   "shader": "GNTAnime.ogsfx",
   "technique": "AnimeOutline"

@@ -25,7 +25,6 @@ uniform mat4 gWVPXf   : WorldViewProjection    < string UIWidget = "None"; >;
 uniform mat4 gWorldXf : World                  < string UIWidget = "None"; >;
 uniform mat4 gWorldIT : WorldInverseTranspose  < string UIWidget = "None"; >;
 uniform mat4 gViewIXf : ViewInverse            < string UIWidget = "None"; >;
-uniform mat4 gVPXf    : ViewProjection         < string UIWidget = "None"; >;
 
 uniform int   Light0Type      : LIGHTTYPE      < string Object = "Light 0"; string UIWidget = "None"; > = 4;
 uniform vec3  Light0Color     : LIGHTCOLOR     < string Object = "Light 0"; string UIWidget = "ColorPicker"; > = {1.0, 1.0, 1.0};

@@ -433,7 +433,7 @@ def set_params(node, mapping):
     """
     skipped = []
     for attr, value in mapping.items():
-        if is_light_param(attr):
+        if is_light_param(attr) or is_engine_param(attr):
             continue
         try:
             set_param(node, attr, value)
@@ -450,6 +450,19 @@ def set_params(node, mapping):
 # different things, which is exactly how it went wrong on Hiro.
 _LIGHT_PARAM = re.compile(r"^Light\d+[A-Z]")
 
+# Values the engine fills in: matrices, and the viewport size. Both shaders name
+# them g + a capital by convention. Maya exposes some of them as ordinary
+# parameters, so a capture swallows them and the "look" ends up carrying the
+# pixel dimensions of whatever viewport happened to be open at the time -- four
+# of the presets in this repo had gScreen baked into them before this check
+# existed. Nothing here belongs to a look.
+_ENGINE_PARAM = re.compile(r"^g[A-Z]")
+
+
+def is_engine_param(attr):
+    """True for a uniform the engine binds, not the artist."""
+    return bool(_ENGINE_PARAM.match(attr))
+
 
 def is_light_param(attr):
     return bool(_LIGHT_PARAM.match(attr))
@@ -459,12 +472,12 @@ def dump_params(node):
     """Read every uniform back into a plain dict.
 
     Texture uniforms come back as the file path feeding them, so a captured
-    preset can rebuild the connection later. Light parameters are left out --
-    they belong to the scene, not to the look.
+    preset can rebuild the connection later. Light and engine parameters are
+    left out -- they belong to the scene and the viewport, not to the look.
     """
     out = {}
     for attr in list_uniforms(node):
-        if is_light_param(attr):
+        if is_light_param(attr) or is_engine_param(attr):
             continue
         try:
             if uniform_type(node, attr) == "texture":

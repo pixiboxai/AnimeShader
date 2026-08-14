@@ -36,7 +36,6 @@ uniform mat4 gWorldIT : WorldInverseTranspose < string UIWidget = "None"; >;
 uniform mat4 gViewIXf : ViewInverse         < string UIWidget = "None"; >;
 uniform mat4 gVPXf    : ViewProjection      < string UIWidget = "None"; >;
 uniform mat4 gViewXf  : View                < string UIWidget = "None"; >;
-uniform vec2 gScreen  : ViewportPixelSize   < string UIWidget = "None"; >;
 
 
 //-----------------------------------------------------------------------------

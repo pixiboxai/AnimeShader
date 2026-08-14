@@ -15,6 +15,8 @@ checks close part of that gap, and pin down the things that cost us time:
 * vertex inputs referenced but missing from APPDATA
 * passes wired to GLSLShader or attribute blocks that do not exist
 * the pixel output actually being written
+* every uniform being read somewhere -- a control that does nothing looks
+  exactly like one that does, from the outside
 """
 
 import os
@@ -178,6 +180,42 @@ def lint(path):
                 unwritten.add("%s.%s" % (entry["out_block"], member))
     check(not unwritten, "%s: pixel outputs are written" % name,
           ", ".join(sorted(unwritten)))
+
+    # A uniform that is declared and never read is a control that does nothing.
+    # It costs an artist real time: the slider moves, the viewport does not, and
+    # there is no way to tell that from the outside. Two engine matrices had
+    # gone stale this way, and one of them -- the viewport pixel size -- was
+    # even being captured into presets, so four saved looks carried the
+    # dimensions of whatever viewport happened to be open when they were made.
+    #
+    # A texture is never named in the code -- it is reached through the sampler
+    # that declares "Texture = <ThatTexture>". So the question for a texture is
+    # whether its *sampler* is read; asking about the texture's own name flags
+    # all seventeen of them, every one of which is in use.
+    sampler_for = {}
+    for match in re.finditer(
+            r"uniform\s+sampler\w*\s+(\w+)\s*=\s*sampler_state\s*\{[^}]*?"
+            r"Texture\s*=\s*<\s*(\w+)\s*>", source, re.DOTALL):
+        sampler_for[match.group(2)] = match.group(1)
+
+    dead = []
+    for match in re.finditer(r"^\s*uniform\s+(\w+)\s+(\w+)", source, re.MULTILINE):
+        kind, uniform = match.group(1), match.group(2)
+        if kind.startswith("sampler"):
+            continue                       # judged through whoever samples it
+        target = uniform
+        floor = 1
+        if kind.startswith("texture"):
+            target = sampler_for.get(uniform)
+            if target is None:
+                dead.append("%s (no sampler)" % uniform)
+                continue
+            # The link line names the texture, not the sampler, so the sampler
+            # is at its own declaration plus one per use: a single use is enough.
+        if len(re.findall(r"\b%s\b" % re.escape(target), source)) <= floor:
+            dead.append(uniform)
+    check(not dead, "%s: every uniform is read somewhere" % name,
+          ", ".join(sorted(dead)))
 
 
 def main():
