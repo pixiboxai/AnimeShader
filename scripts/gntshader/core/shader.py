@@ -74,17 +74,44 @@ def set_shader_file(node, shader_file):
     """
     path = shader_file.replace("\\", "/")
 
-    # Clearing .shader tears the attributes down and takes every texture
-    # connection with it, so the maps have to be remembered and re-plugged.
-    # Without this a reload silently leaves UseAlbedoMap on with nothing
-    # feeding it, and the whole model renders black.
+    # Clearing .shader tears the attributes down. That takes every texture
+    # connection with it -- and every tuned value too: Maya rebuilds the whole
+    # uniform list at its defaults. Both have to be remembered and put back.
+    #
+    # Three things are lost, not one. Only the textures were ever put back.
+    #
+    #   values   every tuned parameter returns to the shader's default, so a
+    #            character silently reverts: UseAlbedoMap off and the model goes
+    #            white, OutlineWidth back to 0.30 and the ink triples.
+    #
+    #   streams  the <varying>_Source bindings revert to map1 / map2 / colorSet,
+    #            names no production mesh has. That one is the worst of the
+    #            three because it does not look like a reset: the albedo samples
+    #            an absent UV set and comes back white, the colour stream reads
+    #            an absent set so vertex AO darkens everything to nothing, and
+    #            the outline reads its width from the same garbage. It presents
+    #            as three unrelated problems.
+    #
+    # This is not confined to reloading by hand. Editing the .ogsfx at all
+    # invalidates what a saved scene holds, so simply opening a Maya file after
+    # a shader change lands in the same state -- which is exactly how it was
+    # found.
     textures = {}
+    values = {}
+    streams = stream_bindings(node)
     if cmds.objExists(node + ".uniformParameters"):
         for attr in cmds.getAttr(node + ".uniformParameters") or []:
+            if is_light_param(attr) or is_engine_param(attr):
+                continue
             if uniform_type(node, attr) == "texture":
                 existing = texture_path(node, attr)
                 if existing:
                     textures[attr] = existing
+                continue
+            try:
+                values[attr] = get_param(node, attr)
+            except (ValueError, RuntimeError):
+                continue
 
     cmds.setAttr(node + ".shader", "", type="string")
     cmds.setAttr(node + ".shader", path, type="string")
@@ -97,6 +124,16 @@ def set_shader_file(node, shader_file):
     except RuntimeError:
         pass
 
+    restored = 0
+    for attr, value in values.items():
+        if not cmds.objExists("{0}.{1}".format(node, attr)):
+            continue                       # uniform removed by the shader edit
+        try:
+            set_param(node, attr, value)
+            restored += 1
+        except (ValueError, RuntimeError):
+            pass
+
     for attr, texture in textures.items():
         if cmds.objExists("{0}.{1}".format(node, attr)):
             try:
@@ -104,7 +141,22 @@ def set_shader_file(node, shader_file):
             except (ValueError, RuntimeError):
                 cmds.warning("GNTShader: lost texture on {0}.{1}".format(node, attr))
 
-    return textures
+    rebound = 0
+    for stream, source in streams.items():
+        target = "{0}.{1}_Source".format(node, stream)
+        if not source or not cmds.objExists(target):
+            continue
+        try:
+            cmds.setAttr(target, source, type="string")
+            rebound += 1
+        except RuntimeError:
+            pass
+
+    return {"textures": textures, "streams_rebound": rebound,
+            "values_restored": restored,
+            "values_dropped": sorted(set(values) - set(
+                a for a in values
+                if cmds.objExists("{0}.{1}".format(node, a))))}
 
 
 def bind_streams(node, mesh, uv_set=None, smooth_uv_set=None, color_set=None,
