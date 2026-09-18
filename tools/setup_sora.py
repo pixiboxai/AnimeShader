@@ -101,6 +101,21 @@ def survey():
     return plan
 
 
+# Line art and rim both draw at the preset's defaults -- but on this character
+# neither is visible, which is not the same thing and took a second measurement
+# to tell apart. OutlineWidth 0.10 grows the silhouette by 0.6%, a hairline, and
+# in near-black ink on dark crimson hair that is nothing at all; RimPower 5 is
+# too narrow a band to catch the eye. Measured at a head crop:
+#
+#     OutlineWidth  0.10 -> +0.6%   0.30 -> +1.8%   0.50 -> +2.9%   0.80 -> +4.5%
+#     RimIntensity  off 115.6       1.0/pow3 119.8      1.8/pow2.2 127.6
+#
+# 0.50 and a wider, stronger rim are what read. The ink also tints further
+# towards each material's own colour, because a single near-black line
+# disappears into dark hair and cuts too hard across pale skin.
+OUTLINE_WIDTH = 0.50
+OUTLINE_TINT = 0.55
+
 # Sora has no specular map and no ILM, so a single highlight setting has to
 # serve every surface -- and the preset's default (intensity 1.4, softness 0.01)
 # lands on flat colour as scattered hard white blobs rather than an anime
@@ -115,7 +130,8 @@ SPEC_CLASS = {
         # shade goes warm, and measuring the leg showed a 33 degree hue swing
         # off the albedo until this was changed
         "ShadowColor": [0.80, 0.63, 0.60], "HalfLambert": 0.70,
-        "RimIntensity": 0.30, "RimColor": [1.0, 0.86, 0.80],
+        "RimIntensity": 1.20, "RimPower": 2.6, "RimUpMask": 0.15,
+        "RimAlbedoTint": 0.50, "RimColor": [1.0, 0.86, 0.80],
         "AmbientColor": [0.16, 0.14, 0.15]}),
 
     "hair": dict(members=("GNT_Sora_phong5_Hair",), params={
@@ -123,25 +139,31 @@ SPEC_CLASS = {
         "AnisoExponent": 40.0, "AnisoShiftIntensity": 0.30, "AnisoBias": 0.18,
         "SpecIntensity": 0.70, "SpecColor": [1.0, 0.92, 0.92],
         "ShadowColor": [0.62, 0.42, 0.50], "HalfLambert": 0.85,
-        "RimIntensity": 0.45}),
+        "RimIntensity": 1.80, "RimPower": 2.2, "RimUpMask": 0.15,
+        "RimAlbedoTint": 0.45}),
 
     "metal": dict(members=("GNT_Sora_Gold1",), params={
         "SpecMode": 1.0, "SpecIntensity": 1.10, "SpecGloss": 90.0,
         "SpecThreshold": 0.62, "SpecSoftness": 0.03,
-        "SpecColor": [1.0, 0.95, 0.80], "RimIntensity": 0.60}),
+        "SpecColor": [1.0, 0.95, 0.80],
+        "RimIntensity": 2.20, "RimPower": 2.2, "RimUpMask": 0.15,
+        "RimAlbedoTint": 0.30}),
 
     # Near-black surfaces: a bright highlight on them reads as noise, not shine.
     "dark": dict(members=("GNT_Sora_Base5", "GNT_Sora_Base6",
                           "GNT_Sora_phong22"), params={
         "SpecMode": 1.0, "SpecIntensity": 0.12, "SpecGloss": 25.0,
-        "SpecThreshold": 0.66, "SpecSoftness": 0.12, "RimIntensity": 0.25}),
+        "SpecThreshold": 0.66, "SpecSoftness": 0.12,
+        "RimIntensity": 1.00, "RimPower": 2.6, "RimUpMask": 0.15,
+        "RimAlbedoTint": 0.60}),
 }
 
 CLOTH = dict(params={
     "SpecMode": 1.0, "SpecIntensity": 0.28, "SpecGloss": 22.0,
     "SpecThreshold": 0.60, "SpecSoftness": 0.16,
     "ShadowColor": [0.58, 0.54, 0.66], "HalfLambert": 0.90,
-    "RimIntensity": 0.35})
+    "RimIntensity": 1.40, "RimPower": 2.4, "RimUpMask": 0.15,
+    "RimAlbedoTint": 0.50})
 
 
 def tune_specular(log=None):
@@ -193,7 +215,9 @@ def split_hair(log=None):
     gshader.set_params(node, {"BaseColor": list(rgb), "AlbedoIsSRGB": 0,
                               "UseAlbedoMap": 0, "UseLightMap": 0,
                               "UseSSSMap": 0, "ILMAoStrength": 0.0,
-                              "OutlineUseVertexColor": 1, "OutlineWidth": 0.10})
+                              "OutlineUseVertexColor": 1, "OutlineWidth": OUTLINE_WIDTH,
+                              "OutlineTintFromAlbedo": 1,
+                              "OutlineTintAmount": OUTLINE_TINT})
     cmds.sets("hair", edit=True, forceElement=sg)
     gshader.bind_streams(node, "hair", uv_set=UV_SET)
     _log(out, "hair split onto %s, colour copied exactly: %s"
@@ -276,7 +300,9 @@ def run(log_path=os.path.join(PROJECT, "sora_setup.txt")):
             "BaseColor": [max(0.0, min(1.0, c)) for c in rgb],
             "UseAlbedoMap": 1 if texture else 0,
             "OutlineUseVertexColor": 1,
-            "OutlineWidth": 0.10,
+            "OutlineWidth": OUTLINE_WIDTH,
+            "OutlineTintFromAlbedo": 1,
+            "OutlineTintAmount": OUTLINE_TINT,
             "ILMAoStrength": 0.0,
             "ILMShadowBias": 0.0,
             "UseLightMap": 0,
